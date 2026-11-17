@@ -9,5 +9,7 @@ next-env.d.ts
 # wrangler files
 .wrangler
 .dev.vars*
+*.tsbuildinfo
+artifacts/
 !.dev.vars.example
 !.env.example

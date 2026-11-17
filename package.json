@@ -1,10 +1,11 @@
 {
-	"name": "pixel-farm",
+	"name": "applebrook",
 	"version": "0.1.0",
 	"private": true,
 	"packageManager": "npm",
 	"dependencies": {
 		"@vinext/cloudflare": "latest",
+		"phaser": "^4.2.1",
 		"react": "latest",
 		"react-dom": "latest",
 		"react-server-dom-webpack": "latest",
@@ -26,6 +27,9 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
+		"assets": "node scripts/generate-assets.mjs",
+		"test": "node --test tests/*.test.ts",
+		"typecheck": "tsc --noEmit",
 		"build": "vite build",
 		"start": "vite preview",
 		"deploy": "vinext-cloudflare deploy",

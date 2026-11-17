@@ -2,7 +2,7 @@ import { bindings, defineConfig, defineWorker } from "cf/config";
 
 export default defineConfig({
   worker: defineWorker({
-    name: "pixel-farm",
+    name: "applebrook",
     entrypoint: "vinext/server/fetch-handler",
     compatibilityDate: "2026-11-17",
     compatibilityFlags: ["nodejs_compat"],
