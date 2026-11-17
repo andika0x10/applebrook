@@ -12,14 +12,14 @@
 		"vinext": "latest"
 	},
 	"devDependencies": {
-		"@cloudflare/vite-plugin": "beta",
+		"@cloudflare/vite-plugin": "^2.0.0-rc.1",
 		"@tailwindcss/postcss": "latest",
 		"@types/node": "latest",
 		"@types/react": "latest",
 		"@types/react-dom": "latest",
 		"@vitejs/plugin-react": "latest",
 		"@vitejs/plugin-rsc": "latest",
-		"cf": "^1.0.0-rc.0",
+		"cf": "^1.0.0-rc.1",
 		"tailwindcss": "latest",
 		"typescript": "latest",
 		"vite": "8.3.0"
