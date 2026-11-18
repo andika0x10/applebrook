@@ -1,6 +1,7 @@
 import type { Priority, ShipmentRoute, Snapshot, Speed, VillageState } from "./types.ts";
-import { advanceVillage, setPriorityShipment, startBuilding } from "./simulation.ts";
+import { advanceVillage, setPriorityShipment, startBuilding, startOuting } from "./simulation.ts";
 import { applyOffline, loadVillage, SAVE_KEY } from "./persistence.ts";
+import type { LandmarkId } from "./world.ts";
 
 export type CameraCommand = { type: "zoom"; delta: number } | { type: "home" } | { type: "pan"; x: number; y: number; revealPanel?: boolean };
 export class VillageController {
@@ -39,6 +40,11 @@ export class VillageController {
     return reason;
   }
   build(id: string) { const result = startBuilding(this.state, id); this.publish(); this.save(); return result; }
+  sendOuting(id: LandmarkId) {
+    const reason = startOuting(this.state, id);
+    if (!reason) { this.publish(); this.save(); }
+    return reason;
+  }
   selectNpc(id: number | null) { this.snapshot = { ...this.snapshot, selectedNpc: id, selectedPlace: null, followNpc: false }; this.publish(); }
   selectPlace(id: string | null) { this.snapshot = { ...this.snapshot, selectedPlace: id, selectedNpc: null, followNpc: false }; this.publish(); }
   followNpc(follow: boolean) { this.snapshot = { ...this.snapshot, followNpc: follow }; this.publish(); }

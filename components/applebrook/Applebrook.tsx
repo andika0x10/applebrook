@@ -5,8 +5,8 @@ import type Phaser from "phaser";
 import { VillageController } from "@/game/controller";
 import type { OfflineReport, Speed, VillageState } from "@/game/types";
 import { Ambience } from "@/game/ambience";
-import { buildReason, calendar, festivalGoals, openingGoalSite, shipmentCarrier } from "@/game/simulation";
-import { BUILD_SITES, SEASON_NAMES, STATIONS, pointAt } from "@/game/world";
+import { buildReason, calendar, festivalGoals, openingGoalSite, outingGoodsText, REGIONAL_ACTIVITIES, shipmentCarrier } from "@/game/simulation";
+import { BUILD_SITES, LANDMARKS, SEASON_NAMES, STATIONS, pointAt } from "@/game/world";
 import Icon from "./Icons";
 import PixelSprite from "./PixelSprite";
 import MiniMap from "./MiniMap";
@@ -65,6 +65,7 @@ function OfflineModal({ report, onClose }: { report: OfflineReport; onClose: () 
         </div>
         {report.bread > 0 && <p>{report.bread} roti dipanggang.</p>}
         {report.buildings > 0 && <p>{report.buildings} bangunan selesai.</p>}
+        {report.outings > 0 && <p>{report.outings} kegiatan di luar desa selesai.</p>}
         <p className="offline-limit">Waktu desa bertambah {Math.max(1, Math.round(report.seconds / 60))} menit.</p>
         <button ref={button} className="primary-button" onClick={onClose}>Kembali ke desa</button>
       </section>
@@ -85,6 +86,7 @@ function GameInterface({ controller }: { controller: VillageController }) {
   const lastSpeed = useRef<Speed>(state.speed || 1);
   const lastVillage = useRef(state);
   const goalButton = useRef<HTMLButtonElement>(null);
+  const mapToggle = useRef<HTMLButtonElement>(null);
   const timeToggle = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
 
@@ -146,6 +148,13 @@ function GameInterface({ controller }: { controller: VillageController }) {
     } else if (previous.priorityShipment && !state.priorityShipment) {
       const carrier = shipmentCarrier(previous, previous.priorityShipment);
       if (carrier && !state.villagers.find(npc => npc.id === carrier.id)?.cargo) setToast("Kiriman yang didahulukan sudah tiba.");
+    } else {
+      const returns = LANDMARKS.flatMap(site => {
+        const outing = state.outings[site.id];
+        if (outing?.phase !== "done" || previous.outings[site.id]?.phase !== "returning") return [];
+        return [outingGoodsText(REGIONAL_ACTIVITIES[site.id].reward, outing.amount)];
+      });
+      if (returns.length) setToast("Warga membawa pulang " + returns.join(", ") + ".");
     }
   }, [snapshot.offline, state]);
 
@@ -251,9 +260,14 @@ function GameInterface({ controller }: { controller: VillageController }) {
         </nav>
 
         <div className="camera-dock">
-          {mapOpen && <MiniMap state={state} controller={controller}/>}
+          {mapOpen && <MiniMap state={state} controller={controller} onVisit={id => {
+            returnFocus.current = mapToggle.current;
+            setMapOpen(false);
+            setPanel(null);
+            controller.selectPlace(id);
+          }}/>}
           <div className="control-tray">
-            <button aria-label="Peta desa" aria-expanded={mapOpen} onClick={() => setMapOpen(open => !open)}><Icon name="map" size={17}/></button>
+            <button ref={mapToggle} aria-label="Peta desa" aria-expanded={mapOpen} onClick={() => setMapOpen(open => !open)}><Icon name="map" size={17}/></button>
             <button aria-label="Pusatkan kamera" onClick={() => controller.camera({ type: "home" })}><Icon name="focus" size={17}/></button>
             <button aria-label="Perkecil peta" onClick={() => controller.camera({ type: "zoom", delta: -0.15 })}><Icon name="minus" size={17}/></button>
             <button aria-label="Perbesar peta" onClick={() => controller.camera({ type: "zoom", delta: 0.15 })}><Icon name="plus" size={17}/></button>

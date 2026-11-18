@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { COLS, ROWS } from "../game/world.ts";
+import { COLS, LANDMARKS, ROWS } from "../game/world.ts";
 import { DISTINCT_ROLES, villagerFrame } from "../game/sprites.ts";
+import { REGIONAL_ACTIVITIES } from "../game/simulation.ts";
 
 const directory = new URL("../public/assets/applebrook/", import.meta.url);
 const atlas = JSON.parse(readFileSync(new URL("village.json", directory), "utf8"));
@@ -20,6 +21,13 @@ test("the Phaser atlas fits its PNG and contains every character direction and s
     }
   }
   for (const name of ["barn", "mill", "mill-sails", "bakery", "house-0", "house-1", "house-2", "tractor", "bridge", "market", "market-green", "construction", "orchard-shed", "well", "plot-mill", "plot-bakery", "plot-cottage", "plot-orchard", "wheat-0", "wheat-1", "wheat-2", "wheat-3"]) assert.ok(frames[name], name);
+  for (const { preview } of LANDMARKS) assert.ok(frames[preview], preview);
+  for (const { prop, rewardFrame } of Object.values(REGIONAL_ACTIVITIES)) {
+    assert.ok(frames[prop], prop);
+    assert.ok(frames[rewardFrame], rewardFrame);
+  }
+  assert.ok(frames["marsh-boardwalk"]);
+  for (const season of ["spring", "summer", "autumn", "winter"]) assert.ok(frames[`marsh-reeds-${season}`]);
   for (const entry of Object.values(frames) as { frame: { x: number; y: number; w: number; h: number } }[]) { const f = entry.frame; assert.ok(f.x + f.w <= 1024 && f.y + f.h <= 1024); }
 });
 test("all four terrain PNGs match the world's 2x rendering scale", () => {

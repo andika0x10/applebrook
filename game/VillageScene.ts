@@ -1,9 +1,9 @@
 import Phaser from "phaser";
 import type { VillageController } from "./controller.ts";
 import type { Point, Season, Villager } from "./types.ts";
-import { calendar, openingGoalSite, SHIPMENTS, shipmentCarrier, wheatStage } from "./simulation.ts";
+import { calendar, openingGoalSite, outingSiteFor, REGIONAL_ACTIVITIES, SHIPMENTS, shipmentCarrier, wheatStage } from "./simulation.ts";
 import { villagerFrame } from "./sprites.ts";
-import { BUILD_SITES, HOME_TILES, STATIONS, WORLD_HEIGHT, WORLD_WIDTH, pointAt } from "./world.ts";
+import { BUILD_SITES, EAST_POND, HOME_TILES, LANDMARKS, LOWER_CROSSING, MARSH_POOLS, STATIONS, TILE, VILLAGE_COLS, VILLAGE_ROWS, WORLD_HEIGHT, WORLD_WIDTH, isBlocked, isRoad, isWater, pointAt, riverCenter, tileAt } from "./world.ts";
 
 interface Actor {
   sprite: Phaser.GameObjects.Sprite;
@@ -18,6 +18,7 @@ export class VillageScene extends Phaser.Scene {
   private crops: Phaser.GameObjects.Image[] = [];
   private structures = new Map<string, Phaser.GameObjects.Image>();
   private hedges: Phaser.GameObjects.Image[] = [];
+  private reeds: Phaser.GameObjects.Image[] = [];
   private hoverLabel!: Phaser.GameObjects.Text;
   private goalLabel!: Phaser.GameObjects.Text;
   private fieldBales: Phaser.GameObjects.Image[] = [];
@@ -96,10 +97,12 @@ export class VillageScene extends Phaser.Scene {
       const side = i % 4;
       let x = 0, y = 0;
       if (side === 0) { x = random() * 165; y = random() * WORLD_HEIGHT; }
-      else if (side === 1) { x = 140 + random() * 1450; y = 30 + random() * 95; }
-      else if (side === 2) { x = 1600 + random() * 140; y = random() * WORLD_HEIGHT; }
-      else { x = 80 + random() * 1550; y = 1140 + random() * 100; }
-      if (Math.abs(x - 1160) > 75) this.tree(x, y, false, Math.floor(random() * 3)).setScale(1.5 + random() * 0.9);
+      else if (side === 1) { x = 140 + random() * (WORLD_WIDTH - 240); y = 30 + random() * 95; }
+      else if (side === 2) { x = WORLD_WIDTH - 128 + random() * 140; y = random() * WORLD_HEIGHT; }
+      else { x = 80 + random() * (WORLD_WIDTH - 180); y = WORLD_HEIGHT - 76 + random() * 100; }
+      if (Math.abs(x - (riverCenter(y / TILE) + 0.5) * TILE) > 75) {
+        this.tree(x, y, false, Math.floor(random() * 3)).setScale(1.5 + random() * 0.9);
+      }
     }
     for (const [x, y, v] of [[250, 200, 1], [310, 240, 0], [530, 190, 2], [590, 270, 1], [980, 210, 0], [1025, 345, 2], [1030, 470, 1], [185, 510, 2], [195, 600, 0], [650, 485, 1], [670, 910, 0], [1030, 1010, 1], [1400, 1030, 0], [1500, 700, 2], [1480, 620, 1]]) this.tree(x, y, false, v);
     for (let row = 0; row < 3; row++) for (let col = 0; col < 4; col++) this.tree(1310 + col * 72, 290 + row * 90, true, col % 3);
@@ -129,6 +132,75 @@ export class VillageScene extends Phaser.Scene {
     this.image("well", 833, 746);
     this.image("lamp", 763, 534); this.image("lamp", 1010, 734);
     this.building("market-west", "market-green", 953, 674, "Pasar desa", "market");
+    this.decorateOutskirts(random);
+  }
+
+  private decorateOutskirts(random: () => number) {
+    const [pond, meadow, ridge, marsh] = LANDMARKS;
+    const dock = pointAt(pond), tree = pointAt(meadow);
+    const groves = [
+      { col: 54, row: 7, width: 5, height: 6, count: 13 },
+      { col: 65, row: 5, width: 4, height: 5, count: 9 },
+      { col: 59, row: 23, width: 8, height: 4, count: 14 },
+      { col: 62, row: 36, width: 8, height: 8, count: 32 },
+      { col: 47, row: 46, width: 5, height: 4, count: 12 },
+      { col: 28, row: 45, width: 3, height: 5, count: 8 },
+      { col: 11, row: 41, width: 6, height: 5, count: 17 },
+      { col: 74, row: 15, width: 6, height: 3, count: 16, pines: true },
+      { col: 88, row: 20, width: 4, height: 4, count: 13, pines: true },
+      { col: 78, row: 22, width: 4, height: 2, count: 12, pines: true },
+      { col: 76, row: 39, width: 7, height: 2, count: 14, pines: true },
+      { col: 82, row: 52, width: 8, height: 6, count: 28, pines: true },
+      { col: 68, row: 62, width: 9, height: 7, count: 26 },
+      { col: 27, row: 64, width: 7, height: 4, count: 16 },
+      { col: 14, row: 53, width: 7, height: 4, count: 20 },
+    ];
+    for (const { col, row, width, height, count, pines } of groves) {
+      for (let i = 0; i < count; i++) {
+        const p = pointAt({ col: col + (random() * 2 - 1) * width, row: row + (random() * 2 - 1) * height });
+        const tile = tileAt(p);
+        if (isRoad(tile.col, tile.row) || isRoad(tile.col, tile.row + 1) || isBlocked(tile.col, tile.row)) continue;
+        const variant = pines && i % 5 !== 0 ? 2 : i % 3;
+        this.tree(p.x, p.y, false, variant).setScale(1.55 + random() * 0.65);
+      }
+    }
+    this.building(pond.id, pond.preview, dock.x - 4, dock.y + 4, pond.name);
+    this.tree(tree.x - 50, tree.y - 13, true, 1).setScale(3.15);
+    this.image("bench", tree.x - 22, tree.y + 3);
+    this.image("basket", tree.x - 42, tree.y + 11, 1.55);
+    const overlook = pointAt(ridge);
+    this.building(ridge.id, ridge.preview, overlook.x - 10, overlook.y + 21, ridge.name);
+    const crossing = pointAt(LOWER_CROSSING);
+    this.building(marsh.id, "marsh-boardwalk", crossing.x, crossing.y + 42, marsh.name);
+    for (const pool of MARSH_POOLS) {
+      for (let i = 0; i < 14; i++) {
+        const angle = i * 2.4, distance = 0.77 + random() * 0.27;
+        const pos = pointAt({
+          col: pool.col + Math.cos(angle) * pool.radiusX * distance,
+          row: pool.row + Math.sin(angle) * pool.radiusY * distance,
+        });
+        const tile = tileAt(pos);
+        if (isRoad(tile.col, tile.row) || !isWater(tile.col, tile.row)) continue;
+        this.reeds.push(this.image(`marsh-reeds-${this.season}`, pos.x, pos.y, 1.25 + random() * 0.75).setFlipX(i % 2 === 0));
+      }
+    }
+    for (const landmark of LANDMARKS) {
+      const pos = pointAt(landmark);
+      const sign = this.image("sign", pos.x + 50, pos.y + 16).setInteractive({ useHandCursor: true });
+      this.target(sign, landmark.name, () => this.controller.selectPlace(landmark.id));
+    }
+    for (const [col, row, frame] of [
+      [56.5, 13.7, "rock"], [64.2, 14.6, "rock"], [65.8, 15.3, "flowers"], [58.2, 15.1, "flowers"],
+      [57.0, 17.0, "sign"], [25.9, 37.8, "sign"], [53.6, 40.5, "bench"], [53.1, 39.8, "rock"],
+      [52.8, 41.1, "flowers"], [19.0, 44.9, "flowers"], [18.4, 43.4, "rock"], [21.9, 43.4, "flowers"],
+      [21.1, 45.5, "flowers"], [16.8, 41.2, "rock"], [23.0, 41.8, "flowers"],
+      [81, 18.6, "sign"], [85.5, 25.1, "rock"], [76.4, 25.9, "flowers"], [87.3, 26.1, "rock"],
+      [74.3, 35.8, "rock"], [80.1, 35.4, "rock"], [84.3, 34.8, "rock"], [90.7, 34.2, "rock"],
+      [65.8, 42.0, "sign"], [54.4, 56.2, "lamp"], [34.6, 56.7, "lamp"], [25.6, 57.4, "sign"],
+    ] as const) {
+      const p = pointAt({ col, row });
+      this.image(frame, p.x, p.y);
+    }
   }
 
   private target(object: Phaser.GameObjects.GameObject, title: string, select: () => void) {
@@ -227,15 +299,20 @@ export class VillageScene extends Phaser.Scene {
   }
   private homeCamera() {
     const camera = this.cameras.main;
+    const villageWidth = VILLAGE_COLS * TILE, villageHeight = VILLAGE_ROWS * TILE;
+    let x = villageWidth / 2, y = 535;
+    let zoom = Phaser.Math.Clamp(Math.min(camera.width / 1470, camera.height / 940), 0.6, 1.25);
     if (this.scale.width <= 680) {
       const goal = openingGoalSite(this.controller.state);
       const point = pointAt(goal ?? STATIONS.market);
-      this.setCameraZoom(Phaser.Math.Clamp(camera.width / 652, 0.56, 0.82));
-      camera.centerOn(goal?.id === "mill" ? point.x + 203 : point.x - 45, point.y - 166);
-      return;
+      x = goal?.id === "mill" ? point.x + 203 : point.x - 45;
+      y = point.y - 166;
+      zoom = Phaser.Math.Clamp(camera.width / 652, 0.56, 0.82);
     }
-    this.setCameraZoom(Phaser.Math.Clamp(Math.min(camera.width / 1470, camera.height / 940), 0.6, 1.25));
-    camera.centerOn(864, 535);
+    this.setCameraZoom(Math.max(zoom, camera.width / villageWidth, camera.height / villageHeight));
+    const halfWidth = Math.min(villageWidth / 2, camera.width / (camera.zoom * 2));
+    const halfHeight = Math.min(villageHeight / 2, camera.height / (camera.zoom * 2));
+    camera.centerOn(Phaser.Math.Clamp(x, halfWidth, villageWidth - halfWidth), Phaser.Math.Clamp(y, halfHeight, villageHeight - halfHeight));
   }
   private focusCamera(x: number, y: number, mode: "center" | "reveal" | "follow" = "center") {
     const camera = this.cameras.main;
@@ -268,6 +345,7 @@ export class VillageScene extends Phaser.Scene {
       this.season = calendarNow.season; this.terrain.setTexture(`terrain-${this.season}`);
       for (const tree of this.trees) tree.image.setFrame(`${tree.apple ? "apple" : "tree"}-${this.season}-${tree.variant}`);
       for (const hedge of this.hedges) hedge.setFrame("hedge-" + this.season);
+      for (const reeds of this.reeds) reeds.setFrame("marsh-reeds-" + this.season);
       for (const building of this.structures.values()) {
         const base = building.getData("base-frame") as string;
         building.setFrame(this.season === "winter" && this.textures.get("village").has(`${base}-winter`) ? `${base}-winter` : base);
@@ -304,8 +382,15 @@ export class VillageScene extends Phaser.Scene {
       actor.sprite.setPosition(Math.round(npc.x), Math.round(npc.y) - (working && frame === 1 ? 2 : 0)).setDepth(npc.y);
       const sleeping = npc.job?.kind === "sleep" && !npc.route.length;
       actor.sprite.setVisible(!sleeping); actor.shadow.setVisible(!sleeping).setPosition(npc.x, npc.y - 1).setDepth(npc.y - 1);
-      actor.cargo.setVisible(!!npc.cargo && !sleeping);
-      if (npc.cargo) actor.cargo.setFrame(`cargo-${npc.cargo.resource}`).setPosition(npc.x + 12, npc.y - 12).setDepth(npc.y + 1);
+      let carried = npc.cargo ? `cargo-${npc.cargo.resource}` : null;
+      const site = npc.job?.kind === "outing" && outingSiteFor(state, npc.id);
+      if (site) {
+        const activity = REGIONAL_ACTIVITIES[site.id], phase = state.outings[site.id]?.phase;
+        if (phase === "returning") carried = activity.rewardFrame;
+        else if (phase === "outbound" && (!npc.route.length || activity.cost)) carried = activity.prop;
+      }
+      actor.cargo.setVisible(!!carried && !sleeping);
+      if (carried) actor.cargo.setFrame(carried).setPosition(npc.x + 12, npc.y - 12 - (working && frame === 1 ? 2 : 0)).setDepth(npc.y + 1);
     }
     this.showYield(!snapshot.offline);
     this.selection.clear();
@@ -328,6 +413,13 @@ export class VillageScene extends Phaser.Scene {
     if (plot) {
       const p = pointAt(plot);
       this.selection.lineStyle(2, 0xffe88a, 0.95).strokeEllipse(p.x, p.y, 68, 25);
+    }
+    const selectedSite = LANDMARKS.find(site => site.id === snapshot.selectedPlace);
+    if (selectedSite) {
+      const point = pointAt(selectedSite);
+      this.selection.lineStyle(2, 0xffe88a, 0.95).strokeEllipse(point.x, point.y, 48, 18);
+      const worker = state.villagers.find(npc => npc.id === REGIONAL_ACTIVITIES[selectedSite.id].worker);
+      if (worker?.job?.kind === "outing") this.drawRoute(worker, 0xfff4cc, 0.65);
     }
     const goal = openingGoalSite(state);
     const compactSelection = this.scale.width <= 360 && goal?.id === snapshot.selectedPlace;
@@ -360,7 +452,8 @@ export class VillageScene extends Phaser.Scene {
     this.selection.strokePath();
   }
   private isWorking(npc: Villager) {
-    return !!npc.job && !npc.route.length && ["plant", "harvest", "pick", "tend", "build", "wood", "bake", "mill"].includes(npc.job.kind);
+    return !!npc.job && !npc.route.length && (["plant", "harvest", "pick", "tend", "build", "wood", "bake", "mill"].includes(npc.job.kind)
+      || (npc.job.kind === "outing" && npc.job.station === "plaza"));
   }
   private showYield(celebrate: boolean) {
     const { stats } = this.controller.state;
@@ -419,6 +512,18 @@ export class VillageScene extends Phaser.Scene {
     }
     // Lazy ripples make the stream feel alive without distracting from villagers.
     this.atmosphere.lineStyle(2, 0xc0e2db, 0.35);
-    for (let i = 0; i < 12; i++) { const y = (i * 103 + time / 120) % WORLD_HEIGHT; const x = (36 + Math.sin(y / 32 / 5.8) * 1.35) * 32 + 10; this.atmosphere.lineBetween(x, y, x + 15, y); }
+    for (let i = 0; i < 16; i++) {
+      const y = (i * 103 + time / 120) % WORLD_HEIGHT, x = riverCenter(y / TILE) * TILE + 10;
+      this.atmosphere.lineBetween(x, y, x + 15, y);
+    }
+    if (this.season !== "winter") {
+      const pond = pointAt(EAST_POND);
+      for (let i = 0; i < 4; i++) {
+        const phase = (time / 130 + i * 18) % 32;
+        const x = pond.x - 57 + i * 37, y = pond.y + (i % 2) * 46 - 22;
+        this.atmosphere.lineStyle(2, 0xc0e2db, Math.sin(phase / 32 * Math.PI) * 0.32);
+        this.atmosphere.lineBetween(x, y, x + phase, y);
+      }
+    }
   }
 }

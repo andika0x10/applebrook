@@ -3,7 +3,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { COLS, ROWS, isRoad, riverCenter } from '../game/world.ts';
+import { COLS, ROWS, VILLAGE_COLS, VILLAGE_ROWS, EAST_POND, MARSH_POOLS, RIDGE_FACE, isRoad, riverCenter, riverHalfWidth } from '../game/world.ts';
 import { DISTINCT_ROLES } from '../game/sprites.ts';
 
 const output = fileURLToPath(new URL('../public/assets/applebrook/', import.meta.url));
@@ -427,6 +427,175 @@ for (const name of ['house-0', 'house-1', 'house-2', 'barn', 'mill', 'bakery', '
   });
 }
 
+asset('pond-dock', 46, 37, p => {
+  p.ellipse(23, 27, 21, 7, '#31585c55');
+  p.poly([[5, 2], [34, 2], [43, 31], [9, 34]], WOOD_DARK);
+  p.poly([[7, 3], [32, 3], [40, 29], [10, 31]], WOOD_LIGHT);
+  for (let i = 0; i < 7; i++) {
+    const y = 5 + i * 4;
+    p.line(8 + Math.floor(i / 3), y + 1, 32 + i, y, WOOD);
+    p.line(15 + (i % 3) * 6, y + 2, 21 + (i % 3) * 6, y + 2, '#deb98a');
+  }
+  for (const [x, y] of [[5, 5], [32, 5], [9, 27], [39, 25]]) {
+    p.rect(x, y - 3, 4, 7, WOOD_DARK);
+    p.rect(x, y - 4, 4, 3, '#dfbd8f');
+  }
+});
+
+asset('marsh-boardwalk', 326, 43, p => {
+  p.rect(3, 5, 320, 34, '#314b465d');
+  p.rect(3, 6, 320, 29, '#524438');
+  p.rect(4, 8, 318, 23, '#997858');
+  for (let x = 6; x < 322; x += 6) {
+    p.rect(x, 9 + (x % 5 === 0 ? 1 : 0), 5, 19, ['#be9e71', '#b49369', '#c5a579'][(x / 6) % 3]);
+    p.pixel(x + 3, 25, '#775e49');
+  }
+  for (const y of [5, 31]) {
+    p.rect(3, y, 320, 3, '#634e3d');
+    p.rect(4, y, 318, 1, '#c29b6f');
+    for (let x = 6; x < 323; x += 19) {
+      p.rect(x, y - 4, 4, 10, WOOD_DARK);
+      p.rect(x, y - 4, 4, 2, '#d0ad82');
+    }
+  }
+});
+
+asset('ridge-lookout', 65, 36, p => {
+  shadow(p, 33, 29, 29, 6);
+  p.poly([[4, 19], [51, 15], [62, 26], [56, 31], [10, 32]], '#645c4e');
+  p.poly([[6, 19], [51, 16], [59, 25], [12, 28]], '#9b9274');
+  for (let x = 13; x < 53; x += 9) p.line(x, 19, x + 3, 26, '#716957');
+  p.line(9, 11, 53, 8, WOOD_DARK, 3);
+  p.line(10, 10, 53, 7, WOOD_LIGHT);
+  p.line(10, 16, 54, 13, WOOD, 2);
+  for (const [x, y] of [[9, 7], [23, 6], [38, 5], [52, 4]]) {
+    p.rect(x, y, 4, 16, WOOD_DARK);
+    p.rect(x, y, 2, 14, WOOD_LIGHT);
+    p.rect(x, y, 4, 2, '#e0bb87');
+  }
+});
+
+for (const season of Object.keys(palettes)) asset(`marsh-reeds-${season}`, 34, 25, p => {
+  const winter = season === 'winter';
+  const blades = winter ? ['#809181', '#a9ad8e', '#d3d3b4'] : ['#4c6b4b', '#638850', '#8fa763'];
+  p.ellipse(17, 22, 15, 3, winter ? '#a0b4af' : '#54745d');
+  for (const [base, x, tip] of [[8, 4, 8], [10, 8, 4], [15, 16, 9], [17, 18, 3], [21, 24, 7], [23, 29, 4], [26, 32, 11]]) {
+    p.line(base, 22, x, tip, blades[base % 3], 2);
+    if (base % 2 === 0) p.rect(x - 1, tip - 2, 3, 5, winter ? '#897f68' : '#795d46');
+  }
+});
+
+asset('outing-rod', 26, 25, p => {
+  p.line(3, 24, 18, 2, '#624c38', 2);
+  p.line(7, 19, 19, 1, '#dbb675');
+  p.line(20, 2, 22, 15, '#e9dec0');
+  p.rect(21, 15, 3, 4, '#d66d52');
+  p.rect(21, 15, 3, 1, '#f9e4ad');
+});
+
+asset('outing-fish', 20, 16, p => {
+  p.poly([[1,7],[5,5],[8,2],[14,3],[17,6],[19,5],[19,11],[16,10],[12,13],[6,12]], '#355e63');
+  p.poly([[2,7],[8,4],[13,4],[17,8],[13,11],[7,11]], '#80b6a3');
+  p.line(5, 9, 13, 10, '#d2d4a8');
+  p.pixel(5, 7, '#35494a');
+  p.pixel(6, 6, '#eff0cc');
+});
+
+function drawRidge(p, season) {
+  const winter = season === 'winter';
+  const [shade, face, mid, light, soil] = winter
+    ? ['#859394', '#718287', '#8c9c9d', '#bcc7bd', '#dfe6d9']
+    : ['#738053', '#595b55', '#797871', '#a39a82', '#aeb787'];
+  const shape = (points, color) => p.poly(points.map(([x, y]) => [(x + 0.5) * 16, (y + 0.5) * 16]), color);
+  shape(RIDGE_FACE.map(([x, y]) => [x, y + 0.85]), shade);
+  shape(RIDGE_FACE, face);
+  shape([[72,28],[75,26],[80,28],[84,26],[89,27],[90.5,30],[87,31.9],[84,31.5],[81,33.2],[78,31.6],[74.1,33.2],[71.8,31.4]], mid);
+  shape([[72,28],[75,26],[80,28],[84,26],[89,27],[90,28.8],[86,29.5],[82,29],[79,30.25],[75.2,29],[72,30]], light);
+  shape([[72,28],[75,26],[80,28],[84,26],[89,27],[88.6,27.5],[84,26.8],[80,28.9],[75.1,26.7],[72.2,29.2]], soil);
+
+  for (const [x, y, dx, dy] of [[73,29,-0.7,3.6],[75.6,28.3,0.5,4.6],[78.3,29.2,-0.2,3.7],
+    [80.8,29.6,1.1,4.7],[83.4,28.6,-0.4,3.8],[86.2,28.8,0.3,3.7],[88.4,28.6,0.7,2.8]]) {
+    shape([[x,y],[x+0.35,y+0.6],[x+dx,y+dy],[x+dx-0.28,y+dy-0.3]], face);
+    shape([[x+0.35,y+0.6],[x+0.5,y+0.8],[x+dx+0.22,y+dy-0.55],[x+dx,y+dy]], light);
+  }
+  const grit = new Map([
+    [face, winter ? ['#66797e', '#809294'] : ['#4e554d', '#666c60']],
+    [mid, winter ? ['#819395', '#a1afad'] : ['#6e7167', '#8a897b']],
+    [light, winter ? ['#aebbb4', '#d4dbcf'] : ['#938f78', '#b1a88c']],
+    [soil, winter ? ['#c9d5c7', '#ebeee3'] : ['#95a278', '#bcc191']],
+  ].map(([base, tones]) => [Number.parseInt(base.slice(1), 16), tones]));
+  let seed = 329;
+  const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let i = 0; i < 1400; i++) {
+    const x = 1140 + Math.floor(random() * 330), y = 422 + Math.floor(random() * 155);
+    const size = 1 + Math.floor(random() * 8), tone = i % 2;
+    for (let offset = 0; offset < size; offset++) {
+      const index = (y * p.width + x + offset) * 4;
+      const color = (p.data[index] << 16) | (p.data[index + 1] << 8) | p.data[index + 2];
+      const shades = grit.get(color);
+      if (shades) p.pixel(x + offset, y, shades[tone]);
+    }
+  }
+  for (const [x, y, width] of [[74,35.3,0.32],[74.5,35.6,0.19],[76.1,34.8,0.26],[79.6,35.4,0.26],
+    [82.3,35.6,0.37],[83.1,35.3,0.2],[86,33.8,0.3],[89,33.7,0.24],[89.6,33.55,0.2]]) {
+    shape([[x-width,y],[x-width*0.45,y-0.16],[x+width*0.5,y-0.12],[x+width,y+0.13],[x-width*0.6,y+0.2]], mid);
+    shape([[x-width,y],[x-width*0.45,y-0.16],[x+width*0.5,y-0.12],[x+width*0.6,y-0.03]], light);
+  }
+}
+
+function drawMarsh(p, season) {
+  const winter = season === 'winter';
+  const [bank, edge, shallow, water, deep] = winter
+    ? ['#b2c1b6', '#ccd8ca', '#a7c0bd', '#91afb4', '#819ea7']
+    : ['#718757', '#889867', '#738e72', '#527876', '#44686a'];
+  for (const { col, row, radiusX, radiusY } of MARSH_POOLS) {
+    const x = (col + 0.5) * 16, y = (row + 0.5) * 16;
+    const rx = radiusX * 16, ry = radiusY * 16;
+    for (let dy = -Math.ceil(ry + 9); dy <= ry + 9; dy++) {
+      const curve = Math.round(Math.sin(dy / 13 + col) * 5 + Math.cos(dy / 8) * 4);
+      const half = rx * Math.sqrt(Math.max(0, 1 - (dy / (ry + 10)) ** 2));
+      p.rect(x + curve - half - 7, y + dy, half * 2 + 14, 1, bank);
+      p.rect(x + curve - half - 3, y + dy, half * 2 + 6, 1, edge);
+      p.rect(x + curve - half + 2, y + dy, half * 2 - 4, 1, shallow);
+      p.rect(x + curve - half + 8, y + dy, half * 2 - 17, 1, water);
+      p.rect(x + curve - half * 0.35 - 5, y + dy, half * 1.04, 1, deep);
+    }
+    for (let i = 0; i < 28; i++) {
+      const angle = i * 2.4, radius = Math.sqrt((i + 1) / 29);
+      const px = x + rx * Math.cos(angle) * radius, py = y + ry * Math.sin(angle) * radius;
+      if (i % 4 === 0) p.rect(px, py, 8 + (i % 7), 1, winter ? '#c7dcd1' : '#84aa97');
+      else if (!winter) p.ellipse(Math.round(px), Math.round(py), 3 + i % 3, 2, i % 2 ? '#819851' : '#657e4d');
+    }
+  }
+}
+
+function drawPond(p, season, grass) {
+  const winter = season === 'winter';
+  const [mud, shore, shallow, water, deep, ripple] = winter
+    ? ['#b9c7b5', '#dce7da', '#b3ccd0', '#90b3be', '#84a8b6', '#d6e6e0']
+    : ['#647f58', '#ada777', '#639e90', '#408184', '#376f79', '#85b6a5'];
+  const x = (EAST_POND.col + 0.5) * 16, y = (EAST_POND.row + 0.5) * 16;
+  const rx = EAST_POND.radiusX * 16, ry = EAST_POND.radiusY * 16;
+  for (let dy = -ry - 6; dy <= ry + 6; dy++) {
+    const bend = Math.round(Math.sin(dy / 15) * 6 + Math.cos(dy / 9) * 2);
+    const radius = rx * Math.sqrt(Math.max(0, 1 - (dy / (ry + 7)) ** 2));
+    p.rect(x + bend - radius - 4, y + dy, radius * 2 + 8, 1, mud);
+    p.rect(x + bend - radius, y + dy, radius * 2, 1, shore);
+    p.rect(x + bend - radius + 3, y + dy, radius * 2 - 6, 1, shallow);
+    p.rect(x + bend - radius + 8, y + dy, radius * 2 - 18, 1, water);
+    p.rect(x + bend - radius * 0.5, y + dy, radius * 1.25 - 12, 1, deep);
+  }
+  for (const [dx, dy, width] of [[-35, -36, 18], [20, -29, 25], [-52, -10, 14], [0, 7, 23], [40, 21, 17], [-24, 37, 24], [11, 49, 12]]) {
+    p.rect(x + dx, y + dy, width, 1, ripple);
+    p.rect(x + dx + 5, y + dy + 3, width * 0.42, 1, shallow);
+  }
+  if (winter) return;
+  for (const [dx, dy] of [[-68, -37], [-83, 11], [-51, 44], [29, 49], [71, 22], [65, -33], [14, -57]]) {
+    p.ellipse(x + dx, y + dy, 4, 2, mud);
+    p.ellipse(x + dx - 1, y + dy - 1, 3, 1, grass);
+  }
+}
+
 for (const season of Object.keys(palettes)) {
   const p = new Pixels(COLS * 16, ROWS * 16);
   const colors = {
@@ -438,7 +607,9 @@ for (const season of Object.keys(palettes)) {
   p.rect(0, 0, p.width, p.height, colors[0]);
   let seed = 84;
   const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  for (const [x, y, width, height] of [[150, 113, 110, 75], [335, 210, 110, 70], [511, 167, 55, 69], [715, 165, 104, 102], [717, 469, 106, 77], [134, 473, 102, 70], [434, 521, 109, 66]]) {
+  for (const [x, y, width, height] of [[150, 113, 110, 75], [335, 210, 110, 70], [511, 167, 55, 69], [715, 165, 104, 102], [717, 469, 106, 77], [134, 473, 102, 70], [434, 521, 109, 66],
+    [999, 293, 93, 65], [990, 426, 130, 106], [327, 696, 169, 88], [674, 690, 96, 72], [816, 726, 105, 64],
+    [1348, 565, 179, 111], [1137, 673, 176, 101], [343, 942, 180, 102], [1272, 966, 185, 124]]) {
     for (let line = -height; line <= height; line += 2) {
       const radius = width * Math.sqrt(1 - (line / height) ** 2);
       const stagger = Math.sin(line / 7) * 5 + Math.cos(line / 17) * 8;
@@ -446,7 +617,13 @@ for (const season of Object.keys(palettes)) {
     }
   }
   for (let i = 0; i < 4500; i++) {
-    p.rect(random() * p.width, random() * p.height, 1 + Math.floor(random() * 5), 1 + Math.floor(random() * 2), colors[1 + i % 3]);
+    p.rect(random() * VILLAGE_COLS * 16, random() * VILLAGE_ROWS * 16, 1 + Math.floor(random() * 5), 1 + Math.floor(random() * 2), colors[1 + i % 3]);
+  }
+  for (let i = 0; i < 12500; i++) {
+    const x = random() * p.width, y = random() * p.height;
+    if (x >= VILLAGE_COLS * 16 || y >= VILLAGE_ROWS * 16) {
+      p.rect(x, y, 1 + Math.floor(random() * 5), 1 + Math.floor(random() * 2), colors[1 + i % 3]);
+    }
   }
   // Irregular trail edges follow the road tiles used by the villagers.
   for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) if (isRoad(col, row)) {
@@ -489,12 +666,19 @@ for (const season of Object.keys(palettes)) {
     p.rect(x, y, 1, 3, color); p.pixel(x - 1, y + 1, color); p.pixel(x + 1, y, color);
   }
 
+  drawRidge(p, season);
+  drawMarsh(p, season);
   const water = season === 'winter' ? ['#a8c8c8', '#8aafb7', '#7c9ca9'] : ['#5b9b91', '#3c7f83', '#346e78'];
   for (let y = 0; y < p.height; y++) {
     const center = Math.round(riverCenter(y / 16) * 16 + 8 + Math.sin(y / 43) * 3);
-    const spread = 21 + Math.round(Math.cos(y / 32) * 3);
-    p.rect(center - spread - 7, y, spread * 2 + 14, 1, colors[1]);
-    p.rect(center - spread - 4, y, spread * 2 + 8, 1, '#b2aa79');
+    const spread = Math.round(riverHalfWidth(y / 16) * 16 + Math.cos(y / 32) * 3);
+    for (const direction of [-1, 1]) {
+      const bank = center + direction * spread;
+      const col = (bank + 4 * direction) / 16 - 0.5, row = y / 16 - 0.5;
+      if (MARSH_POOLS.some(pool => ((col - pool.col) / pool.radiusX) ** 2 + ((row - pool.row) / pool.radiusY) ** 2 < 1)) continue;
+      p.rect(bank - (direction < 0 ? 7 : 0), y, 7, 1, colors[1]);
+      p.rect(bank - (direction < 0 ? 4 : 0), y, 4, 1, '#b2aa79');
+    }
     p.rect(center - spread, y, spread * 2, 1, water[0]);
     p.rect(center - spread + 4, y, spread * 2 - 9, 1, water[1]);
     p.rect(center - 9, y, spread + 2, 1, water[2]);
@@ -505,7 +689,7 @@ for (const season of Object.keys(palettes)) {
   for (let y = 17; y < p.height; y += 14 + Math.floor(random() * 12)) {
     if (y > 268 && y < 307) continue;
     const center = riverCenter(y / 16) * 16 + 8;
-    const x = center + (random() < 0.5 ? -1 : 1) * (20 + random() * 7);
+    const x = center + (random() < 0.5 ? -1 : 1) * (riverHalfWidth(y / 16) * 16 + random() * 7);
     if (season === 'winter') {
       p.ellipse(Math.round(x), y, 6, 2, '#ccdcd1');
     } else if (random() < 0.6) {
@@ -518,6 +702,7 @@ for (const season of Object.keys(palettes)) {
       p.ellipse(Math.round(x) - 1, y - 1, 3, 2, '#9fb79d');
     }
   }
+  drawPond(p, season, colors[3]);
   writeFileSync(output + 'terrain-' + season + '.png', png(p));
 }
 writeFileSync(output + 'village.png', png(atlas));

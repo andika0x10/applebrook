@@ -1,8 +1,9 @@
 import type { Cargo, Job, JobKind, Project, ShipmentRoute, Station, Tile, VillageState, Villager } from "./types.ts";
-import { BUILD_SITES, DAY_SECONDS, DAYS_PER_SEASON, HOME_TILES, SEASONS, SEASON_NAMES, STATIONS, findRoute, pointAt } from "./world.ts";
+import { BUILD_SITES, DAY_SECONDS, DAYS_PER_SEASON, HOME_TILES, LANDMARKS, SEASONS, SEASON_NAMES, STATIONS, findRoute, pointAt, type LandmarkId } from "./world.ts";
 
 const NAMES = ["Mara", "Elsie", "Otto", "Theo", "Lily", "Finn", "Hazel", "Jasper", "Nora", "Arthur", "Rose", "Hugo", "Ivy", "Oscar", "Wren", "Felix", "Alice", "Milo", "Clara", "Robin", "Edith", "Leo", "Pearl", "Arlo"];
 const ROLES = ["farmer", "merchant", "driver", "farmer", "gardener", "hauler", "gardener", "hauler", "baker", "carpenter", "farmer", "miller"] as const;
+const WOOD_CAPACITY = 250;
 const STARTING_LOCATIONS: Tile[] = [
   { col: 17, row: 23 }, { col: 27, row: 21 }, { col: 14, row: 17 },
   { col: 13, row: 24 }, { col: 44, row: 14 }, { col: 15, row: 14 },
@@ -31,7 +32,7 @@ export function createVillage(): VillageState {
     version: 1, elapsed: 32, coins: 240, inventory: { wheat: 24, apples: 16, flour: 0, bread: 0, wood: 85 },
     fieldStock: { wheat: 0, apples: 0 }, marketStock: { wheat: 12, apples: 8, flour: 0, bread: 0, wood: 0 },
     millInput: 0, millOutput: 0, bakeryInput: 0, bakeryOutput: 0,
-    wheatGrowth: 0.93, appleGrowth: 0.3, priority: "balanced", speed: 1, priorityShipment: null,
+    wheatGrowth: 0.93, appleGrowth: 0.3, priority: "balanced", speed: 1, priorityShipment: null, outings: {},
     villagers: Array.from({ length: 12 }, (_, id) => makeVillager(id)), projects: [],
     journal: [], stats: { earned: 0, harvestedWheat: 0, harvestedApples: 0, breadBaked: 0, festivalYear: 0 }, nextEventId: 1,
   };
@@ -40,6 +41,104 @@ export function createVillage(): VillageState {
   return state;
 }
 export const hasBuilding = (state: VillageState, kind: string) => state.projects.some(p => p.kind === kind && p.complete);
+
+type OutingGoods = { resource: "apples" | "wood"; amount: number };
+interface RegionalActivity {
+  worker: number;
+  action: string;
+  working: string;
+  duration: number;
+  cost?: OutingGoods;
+  reward: OutingGoods | { resource: "coins"; amount: number };
+  prop: string;
+  rewardFrame: string;
+}
+
+export const REGIONAL_ACTIVITIES: Record<LandmarkId, RegionalActivity> = {
+  "east-pond": {
+    worker: 5, action: "Memancing", working: "Memancing di dermaga", duration: 12,
+    cost: { resource: "wood", amount: 4 }, reward: { resource: "coins", amount: 42 },
+    prop: "outing-rod", rewardFrame: "outing-fish",
+  },
+  "south-meadow": {
+    worker: 4, action: "Petik apel liar", working: "Memetik apel liar", duration: 8,
+    reward: { resource: "apples", amount: 12 }, prop: "basket", rewardFrame: "cargo-apples",
+  },
+  "pine-ridge": {
+    worker: 9, action: "Kumpulkan kayu", working: "Mengikat kayu tumbang", duration: 10,
+    reward: { resource: "wood", amount: 14 }, prop: "cargo-wood", rewardFrame: "cargo-wood",
+  },
+  "lower-marsh": {
+    worker: 7, action: "Antar pesanan apel", working: "Menyerahkan pesanan di jembatan", duration: 5,
+    cost: { resource: "apples", amount: 6 }, reward: { resource: "coins", amount: 48 },
+    prop: "crate", rewardFrame: "hud-coin",
+  },
+};
+const outingSitesByWorker = new Map(LANDMARKS.map(landmark => [REGIONAL_ACTIVITIES[landmark.id].worker, landmark]));
+export const outingGoodsText = (goods: RegionalActivity["reward"], amount = goods.amount) =>
+  `${amount} ${goods.resource === "coins" ? "koin" : goods.resource === "wood" ? "kayu" : "apel"}`;
+
+export function outingSiteFor(state: VillageState, villagerId: number) {
+  const site = outingSitesByWorker.get(villagerId);
+  const outing = site && state.outings[site.id];
+  return outing && outing.phase !== "done" ? site : undefined;
+}
+
+export function outingReason(state: VillageState, id: LandmarkId): string | null {
+  const outing = state.outings[id], activity = REGIONAL_ACTIVITIES[id];
+  if (outing && outing.phase !== "done") return "Kegiatan sedang berlangsung.";
+  const date = calendar(state);
+  if (date.season === "winter" && id === "south-meadow") return "Apel liar tersedia lagi setelah musim dingin.";
+  if (outing?.day === date.dayTotal) return "Bisa ditugaskan lagi besok.";
+  if (activity.reward.resource === "wood" && state.inventory.wood >= WOOD_CAPACITY) return "Persediaan kayu sudah penuh.";
+  if (activity.cost && state.inventory[activity.cost.resource] < activity.cost.amount)
+    return `Perlu ${outingGoodsText(activity.cost, activity.cost.amount - state.inventory[activity.cost.resource])} lagi di lumbung.`;
+  return null;
+}
+
+export function startOuting(state: VillageState, id: LandmarkId): string | null {
+  const reason = outingReason(state, id);
+  if (reason) return reason;
+  const { worker, cost, action } = REGIONAL_ACTIVITIES[id];
+  const npc = state.villagers.find(villager => villager.id === worker);
+  if (!npc) return "Warga yang ditugaskan tidak tersedia.";
+  if (cost) state.inventory[cost.resource] -= cost.amount;
+  state.outings[id] = { phase: cost ? "supplies" : "outbound" };
+  if (!npc.cargo && (npc.job?.kind === "rest" || npc.job?.kind === "sleep")) { npc.job = null; npc.route = []; }
+  addEntry(state, `${npc.name} bersiap untuk ${action.toLowerCase()}.`);
+  return null;
+}
+
+export function outingStation(id: LandmarkId, phase: "supplies" | "outbound" | "returning"): Station {
+  switch (phase) {
+    case "supplies": return "barn";
+    case "outbound": return "plaza";
+    case "returning": return REGIONAL_ACTIVITIES[id].reward.resource === "coins" ? "market" : "barn";
+  }
+}
+
+function finishOuting(state: VillageState, npc: Villager) {
+  const site = outingSiteFor(state, npc.id);
+  if (!site) return;
+  const outing = state.outings[site.id];
+  if (outing?.phase === "supplies") {
+    state.outings[site.id] = { phase: "outbound" };
+    return;
+  }
+  if (outing?.phase === "outbound") {
+    state.outings[site.id] = { phase: "returning" };
+    return;
+  }
+  const { reward } = REGIONAL_ACTIVITIES[site.id];
+  let amount = reward.amount;
+  if (reward.resource === "coins") { state.coins += amount; state.stats.earned += amount; }
+  else {
+    if (reward.resource === "wood") amount = Math.min(amount, Math.max(0, WOOD_CAPACITY - state.inventory.wood));
+    state.inventory[reward.resource] += amount;
+  }
+  state.outings[site.id] = { phase: "done", day: calendar(state).dayTotal, amount };
+  addEntry(state, `${npc.name} kembali dari ${site.name} dengan ${outingGoodsText(reward, amount)}.`, reward.resource === "coins" ? "trade" : "village");
+}
 export function openingGoalSite(state: VillageState) {
   if (state.stats.breadBaked > 0) return undefined;
   const id = hasBuilding(state, "mill") ? "bakery" : "mill";
@@ -134,6 +233,12 @@ function hauling(state: VillageState): Job | null {
 }
 function chooseJob(state: VillageState, npc: Villager): Job {
   if (npc.cargo) return job("deliver", npc.cargo.destination, 1.6);
+  const site = outingSiteFor(state, npc.id);
+  const outing = site && state.outings[site.id];
+  if (site && outing && outing.phase !== "done") {
+    const duration = outing.phase === "outbound" ? REGIONAL_ACTIVITIES[site.id].duration : 1.6;
+    return job("outing", outingStation(site.id, outing.phase), duration);
+  }
   const time = calendar(state);
   const firstBread = !state.stats.breadBaked && state.projects.some(p => p.kind === "bakery");
   const openingNight = time.night && time.dayTotal === 0 && firstBread;
@@ -169,6 +274,10 @@ function chooseJob(state: VillageState, npc: Villager): Job {
 }
 function destinationFor(npc: Villager, state: VillageState): Tile {
   const current = npc.job!;
+  if (current.kind === "outing" && current.station === "plaza") {
+    const site = outingSiteFor(state, npc.id);
+    if (site) return site;
+  }
   if (current.station === "home") return HOME_TILES[npc.home] ?? HOME_TILES[0];
   if (current.kind === "build") {
     const project = state.projects.find(p => p.id === current.projectId);
@@ -257,7 +366,8 @@ function finishJob(state: VillageState, npc: Villager) {
       if (project) { project.remaining -= 2; if (project.remaining <= 0) finishProject(state, project); }
       break;
     }
-    case "wood": state.inventory.wood = Math.min(250, state.inventory.wood + 2); break;
+    case "wood": state.inventory.wood = Math.min(WOOD_CAPACITY, state.inventory.wood + 2); break;
+    case "outing": finishOuting(state, npc); break;
   }
   npc.completed++; npc.job = null;
 }
@@ -272,7 +382,7 @@ export function advanceVillage(state: VillageState, seconds: number) {
     const before = calendar(state); state.elapsed += dt; const after = calendar(state);
     if (before.season !== after.season) {
       addEntry(state, `${SEASON_NAMES[after.season]} tiba. ${after.season === "winter" ? "Ladang beristirahat, dapur dan bengkel tetap hangat." : after.season === "autumn" ? "Apel siap dipetik dan desa menyiapkan Festival Panen." : "Desa menyambut musim yang baru."}`, "season");
-      for (const npc of state.villagers) if (!npc.cargo) { npc.job = null; npc.route = []; }
+      for (const npc of state.villagers) if (!npc.cargo && npc.job?.kind !== "outing") { npc.job = null; npc.route = []; }
     }
     if (after.season !== "winter") state.wheatGrowth = Math.min(1, state.wheatGrowth + dt / 100);
     if (after.season === "autumn") state.appleGrowth = Math.min(1, state.appleGrowth + dt / 65);
@@ -297,8 +407,16 @@ export function advanceVillage(state: VillageState, seconds: number) {
     }
   }
 }
-export function activityText(npc: Villager): string {
+export function activityText(npc: Villager, state: VillageState): string {
   if (!npc.job) return "Menyiapkan kegiatan berikutnya";
+  if (npc.job.kind === "outing") {
+    const site = outingSiteFor(state, npc.id);
+    if (!site) return "Bekerja di luar desa";
+    const phase = state.outings[site.id]?.phase;
+    if (phase === "supplies") return npc.route.length ? "Menuju lumbung untuk mengambil bekal" : "Mengambil bekal";
+    if (phase === "returning") return npc.route.length ? "Membawa hasil kembali ke desa" : "Menyerahkan hasil kegiatan";
+    return npc.route.length ? `Menuju ${site.name}` : REGIONAL_ACTIVITIES[site.id].working;
+  }
   if (npc.route.length) {
     if (npc.job.kind === "build") return "Menuju lokasi pembangunan";
     if (npc.cargo) return `Mengantar ${npc.cargo.amount} ${({ wheat: "gandum", apples: "apel", flour: "tepung", bread: "roti", wood: "kayu" })[npc.cargo.resource]}`;

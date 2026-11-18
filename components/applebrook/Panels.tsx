@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { VillageController } from "@/game/controller";
 import type { Priority, Resource, ShipmentRoute, Snapshot, VillageState } from "@/game/types";
-import { activityText, buildReason, calendar, festivalGoals, hasBuilding, SHIPMENTS, shipmentStatus, wheatStage } from "@/game/simulation";
+import { activityText, buildReason, calendar, festivalGoals, hasBuilding, outingGoodsText, outingReason, REGIONAL_ACTIVITIES, SHIPMENTS, shipmentStatus, wheatStage } from "@/game/simulation";
 import { villagerFrame } from "@/game/sprites";
-import { BUILD_SITES, RESOURCE_NAMES, ROLE_NAMES, SEASON_NAMES } from "@/game/world";
+import { BUILD_SITES, LANDMARKS, RESOURCE_NAMES, ROLE_NAMES, SEASON_NAMES, type LandmarkId } from "@/game/world";
 import Icon from "./Icons";
 import PixelSprite from "./PixelSprite";
 
@@ -76,7 +76,7 @@ export function VillagePanel({ panel, snapshot, controller, onClose, onBuild }: 
           {project ? project.complete ? <span className="complete-label"><Icon name="check" size={15}/> Sudah menjadi bagian desa</span> : <><div className="build-progress-label"><span>Sedang dibangun</span><span>{Math.round((1 - project.remaining / site.seconds) * 100)}%</span></div><Progress value={(1 - project.remaining / site.seconds) * 100}/></> : <><div className="build-item-bottom"><span className="build-price"><Icon name="coin" size={16}/>{site.coins}<Icon name="wood" size={16}/>{site.wood}</span><button className="small-button" disabled={!!reason} onClick={() => onBuild(site.id)}>Bangun <Icon name="plus" size={14}/></button></div>{reason && <p className="build-reason">{reason}</p>}</>}
         </article>;
       })}</div>}
-      {panel === "villagers" && <><div className="panel-note"><span className="live-dot"/>{state.villagers.length} penduduk menjalani hari mereka</div><div className="villager-list">{state.villagers.map(npc => <button className="villager-row" key={npc.id} onClick={() => { controller.selectNpc(npc.id); controller.camera({ type: "pan", x: npc.x, y: npc.y, revealPanel: true }); }}><span className="portrait"><PixelSprite name={villagerFrame(npc, "down", 0)} size={40}/></span><span className="villager-copy"><strong>{npc.name}<span>{ROLE_NAMES[npc.role]}</span></strong><small>{activityText(npc)}</small></span><Icon name="chevron" size={16}/></button>)}</div></>}
+      {panel === "villagers" && <><div className="panel-note"><span className="live-dot"/>{state.villagers.length} penduduk menjalani hari mereka</div><div className="villager-list">{state.villagers.map(npc => <button className="villager-row" key={npc.id} onClick={() => { controller.selectNpc(npc.id); controller.camera({ type: "pan", x: npc.x, y: npc.y, revealPanel: true }); }}><span className="portrait"><PixelSprite name={villagerFrame(npc, "down", 0)} size={40}/></span><span className="villager-copy"><strong>{npc.name}<span>{ROLE_NAMES[npc.role]}</span></strong><small>{activityText(npc, state)}</small></span><Icon name="chevron" size={16}/></button>)}</div></>}
       {panel === "priority" && <>
         <ShipmentControls state={state} controller={controller} routes={["wheat-to-mill", "flour-to-bakery"]}/>
         <h3 className="section-title">Kebijakan desa</h3>
@@ -85,9 +85,43 @@ export function VillagePanel({ panel, snapshot, controller, onClose, onBuild }: 
       {panel === "journal" && <div className="journal-list">{state.journal.map(entry => <article className="journal-entry" key={entry.id}><span className={`journal-symbol ${entry.kind}`}><Icon name={entry.kind === "build" ? "build" : entry.kind === "season" ? "leaf" : entry.kind === "trade" ? "coin" : "house"} size={16}/></span><div><small>Hari desa ke-{entry.day + 1}</small><p>{entry.text}</p></div></article>)}</div>}
       {panel === "stock" && <><div className="stock-list">{(["wheat", "apples", "flour", "bread", "wood"] as Resource[]).map(resource => <div className="stock-row" key={resource}><span className={`resource-icon resource-${resource}`}><Icon name={STOCK_ICONS[resource]} size={24}/></span><div><strong>{RESOURCE_NAMES[resource]}</strong><small>{state.inventory[resource]} di lumbung, {state.marketStock[resource]} di pasar</small></div><b>{totalStock(state, resource)}</b></div>)}</div><h3 className="section-title">Perjalanan hasil panen</h3><div className="production-chain"><span><Icon name="wheat"/>Gandum</span><Icon name="chevron" size={12}/><span><Icon name="flour"/>Tepung</span><Icon name="chevron" size={12}/><span><Icon name="bread"/>Roti</span></div><p className="quiet-note">Jumlah di atas termasuk barang di ladang, tempat produksi, pasar, dan yang sedang diangkut.</p><div className="earnings-note"><Icon name="coin" size={24}/><span>Total hasil perdagangan<strong>{state.stats.earned.toLocaleString("id-ID")} koin</strong></span></div></>}
       {panel === "festival" && <><div className="festival-illustration"><PixelSprite name="market" size={95}/><span className="festival-confetti">✦</span><PixelSprite name="npc-1-down-0" size={45}/><PixelSprite name="npc-4-down-0" size={45}/></div><p className="body-copy">Festival berlangsung pada sore terakhir musim gugur jika semua persiapan selesai.</p><div className="festival-goals">{["Bangun penggilingan", "Buka toko roti", "Sambut 16 penduduk", "Hasilkan 300 koin dari pasar"].map((goal, i) => <div key={goal} className={festivalGoals(state)[i] ? "goal-done" : ""}><span>{festivalGoals(state)[i] ? <Icon name="check" size={14}/> : <span/>}</span>{goal}</div>)}</div><div className="panel-note"><Icon name="flag" size={16}/>{state.stats.festivalYear === calendar(state).year ? "Festival tahun ini sudah dirayakan!" : `${festivalGoals(state).filter(Boolean).length} dari 4 persiapan selesai`}</div></>}
-      {panel === "guide" && <><div className="guide-lead"><PixelSprite name="tree-spring-0" size={70}/><p>Warga bekerja otomatis. Klik warga untuk melihat pekerjaan dan rutenya.</p></div><div className="guide-section"><h3>Pembangunan</h3><p>Buka menu Bangun dan buat penggilingan pertama. Arthur akan mengerjakannya; Hugo akan mengolah gandum setelah bangunan siap.</p></div><div className="guide-section"><h3>Ikuti warga</h3><p>Klik warga di peta atau daftar penduduk. Pilih Ikuti untuk menemani perjalanan mereka dan melihat barang yang diangkut.</p></div><div className="guide-section"><h3>Musim</h3><p>Satu hari berlangsung 6 menit dan satu musim terdiri dari 4 hari. Apel dipanen saat gugur. Saat dingin, warga mengangkut bekal, membuat roti, dan mengumpulkan kayu.</p></div><div className="guide-section"><h3>Penyimpanan dan waktu offline</h3><p>Progres tersimpan di browser ini setiap 8 detik. Saat Anda pergi, pekerjaan dihitung hingga 24 menit pada kecepatan normal. Menjeda game juga menjeda hasil offline.</p></div><h3 className="section-title">Kontrol sederhana</h3><div className="shortcut-list"><span>Geser peta</span><kbd>Tarik / ← ↑ ↓ →</kbd><span>Perbesar / perkecil</span><kbd>Scroll</kbd><span>Jeda / lanjutkan</span><kbd>Spasi</kbd><span>Kembali ke tengah</span><kbd>H</kbd><span>Bangun / penduduk</span><kbd>B / N</kbd><span>Tutup panel</span><kbd>Esc</kbd></div></>}
+      {panel === "guide" && <><div className="guide-lead"><PixelSprite name="tree-spring-0" size={70}/><p>Warga bekerja otomatis. Klik warga untuk melihat pekerjaan dan rutenya.</p></div><div className="guide-section"><h3>Pembangunan</h3><p>Buka menu Bangun dan buat penggilingan pertama. Arthur akan mengerjakannya; Hugo akan mengolah gandum setelah bangunan siap.</p></div><div className="guide-section"><h3>Ikuti warga</h3><p>Klik warga di peta atau daftar penduduk. Pilih Ikuti untuk menemani perjalanan mereka dan melihat barang yang diangkut.</p></div><div className="guide-section"><h3>Kegiatan di luar desa</h3><p>Buka Peta desa dan pilih lokasi untuk menugaskan warga. Hasil masuk ke desa setelah warga pulang.</p></div><div className="guide-section"><h3>Musim</h3><p>Satu hari berlangsung 6 menit dan satu musim terdiri dari 4 hari. Apel dipanen saat gugur. Saat dingin, warga mengangkut bekal, membuat roti, dan mengumpulkan kayu.</p></div><div className="guide-section"><h3>Penyimpanan dan waktu offline</h3><p>Progres tersimpan di browser ini setiap 8 detik. Saat Anda pergi, pekerjaan dihitung hingga 24 menit pada kecepatan normal. Menjeda game juga menjeda hasil offline.</p></div><h3 className="section-title">Kontrol sederhana</h3><div className="shortcut-list"><span>Geser peta</span><kbd>Tarik / ← ↑ ↓ →</kbd><span>Perbesar / perkecil</span><kbd>Scroll</kbd><span>Jeda / lanjutkan</span><kbd>Spasi</kbd><span>Kembali ke tengah</span><kbd>H</kbd><span>Bangun / penduduk</span><kbd>B / N</kbd><span>Tutup panel</span><kbd>Esc</kbd></div></>}
     </div>
   </aside>;
+}
+
+function LandmarkActivity({ id, state, controller }: { id: LandmarkId; state: VillageState; controller: VillageController }) {
+  const [error, setError] = useState<string | null>(null);
+  const activity = REGIONAL_ACTIVITIES[id], outing = state.outings[id];
+  const worker = state.villagers.find(npc => npc.id === activity.worker);
+  const running = outing && outing.phase !== "done";
+  const finishedToday = outing?.phase === "done" && outing.day === calendar(state).dayTotal;
+  const reason = worker ? outingReason(state, id) : "Warga yang ditugaskan tidak tersedia.";
+  const status = !running || !worker ? null : state.speed === 0 ? "Lanjutkan waktu agar warga bisa berangkat."
+    : worker.job?.kind === "outing" ? activityText(worker, state)
+    : outing.phase === "returning" ? "Bersiap kembali ke desa"
+    : worker.job ? `${worker.name} masih menyelesaikan pekerjaan sebelumnya.` : `${worker.name} bersiap berangkat.`;
+
+  return <section className="landmark-activity" aria-label="Kegiatan di lokasi">
+    <h3>{activity.action}</h3>
+    <div className="landmark-rewards">
+      {activity.cost && <span><PixelSprite name={`cargo-${activity.cost.resource}`} size={18}/>Bekal {outingGoodsText(activity.cost)}</span>}
+      <span><PixelSprite name={activity.reward.resource === "coins" ? "hud-coin" : `cargo-${activity.reward.resource}`} size={18}/>
+        {finishedToday ? "Diterima" : activity.reward.resource === "wood" ? "Hingga" : "Hasil"} {outingGoodsText(activity.reward, finishedToday ? outing.amount : activity.reward.amount)}
+      </span>
+    </div>
+    {running && worker && <>
+      <p className="quiet-note" role="status">{status}</p>
+      {worker.job?.kind === "outing" && !worker.route.length && outing.phase === "outbound" && <Progress value={(1 - worker.job.remaining / worker.job.duration) * 100}/>}
+    </>}
+    <button type="button" className="primary-button" disabled={!worker || (!running && !!reason)} onClick={() => {
+      if (running && worker) { controller.selectNpc(worker.id); controller.followNpc(true); }
+      else setError(controller.sendOuting(id));
+    }}>
+      {running && worker ? <><Icon name="focus" size={17}/>Ikuti {worker.name}</> : `Tugaskan ${worker?.name ?? "warga"}`}
+    </button>
+    {!running && (reason || error) && <p className="build-reason" role="status">{reason || error}</p>}
+  </section>;
 }
 
 export function SelectionCard({ snapshot, controller, onBuild, onClose }: { snapshot: Snapshot; controller: VillageController; onBuild: (id: string) => void; onClose: () => void }) {
@@ -96,8 +130,16 @@ export function SelectionCard({ snapshot, controller, onBuild, onClose }: { snap
   const ref = useRef<HTMLElement>(null);
   const ordered = !!project;
   useEffect(() => { ref.current?.focus({ preventScroll: true }); }, [place, snapshot.selectedNpc, ordered]);
-  if (npc) return <aside ref={ref} className="selection-card" tabIndex={-1} aria-label={`Tentang ${npc.name}`}><button className="icon-button card-close" onClick={onClose} aria-label="Tutup detail penduduk"><Icon name="close" size={17}/></button><div className="npc-detail-heading"><span className="portrait portrait-large"><PixelSprite name={villagerFrame(npc, "down", 0)} size={62}/></span><div><h2>{npc.name}</h2><p>{ROLE_NAMES[npc.role]}</p></div></div><div className="npc-activity"><span className="live-dot"/><span>{activityText(npc)}</span></div>{npc.job && !npc.route.length && <Progress value={(1 - npc.job.remaining / npc.job.duration) * 100}/>}<div className="detail-facts"><span>Rumah<strong>Rumah {npc.home + 1}</strong></span><span>Pekerjaan selesai<strong>{npc.completed}</strong></span></div>{npc.cargo && <div className="panel-note"><Icon name={STOCK_ICONS[npc.cargo.resource]} size={16}/>Membawa {npc.cargo.amount} {RESOURCE_NAMES[npc.cargo.resource].toLowerCase()}</div>}<button className={`primary-button ${snapshot.followNpc ? "is-following" : ""}`} aria-pressed={snapshot.followNpc} onClick={() => controller.followNpc(!snapshot.followNpc)}><Icon name="focus" size={17}/>{snapshot.followNpc ? `Sedang mengikuti ${npc.name}` : `Ikuti ${npc.name}`}</button></aside>;
+  if (npc) return <aside ref={ref} className="selection-card" tabIndex={-1} aria-label={`Tentang ${npc.name}`}><button className="icon-button card-close" onClick={onClose} aria-label="Tutup detail penduduk"><Icon name="close" size={17}/></button><div className="npc-detail-heading"><span className="portrait portrait-large"><PixelSprite name={villagerFrame(npc, "down", 0)} size={62}/></span><div><h2>{npc.name}</h2><p>{ROLE_NAMES[npc.role]}</p></div></div><div className="npc-activity"><span className="live-dot"/><span>{activityText(npc, state)}</span></div>{npc.job && !npc.route.length && <Progress value={(1 - npc.job.remaining / npc.job.duration) * 100}/>}<div className="detail-facts"><span>Rumah<strong>Rumah {npc.home + 1}</strong></span><span>Pekerjaan selesai<strong>{npc.completed}</strong></span></div>{npc.cargo && <div className="panel-note"><Icon name={STOCK_ICONS[npc.cargo.resource]} size={16}/>Membawa {npc.cargo.amount} {RESOURCE_NAMES[npc.cargo.resource].toLowerCase()}</div>}<button className={`primary-button ${snapshot.followNpc ? "is-following" : ""}`} aria-pressed={snapshot.followNpc} onClick={() => controller.followNpc(!snapshot.followNpc)}><Icon name="focus" size={17}/>{snapshot.followNpc ? `Sedang mengikuti ${npc.name}` : `Ikuti ${npc.name}`}</button></aside>;
   if (!place) return null;
+  const landmark = LANDMARKS.find(candidate => candidate.id === place);
+  if (landmark) return <aside ref={ref} className="selection-card" tabIndex={-1} aria-label={landmark.name}>
+    <button className="icon-button card-close" onClick={onClose} aria-label="Tutup detail lokasi"><Icon name="close" size={17}/></button>
+    <div className="place-preview"><PixelSprite name={landmark.preview} size={84}/></div>
+    <h2>{landmark.name}</h2>
+    <p className="body-copy">{landmark.description}</p>
+    <LandmarkActivity key={landmark.id} id={landmark.id} state={state} controller={controller}/>
+  </aside>;
   const site = BUILD_SITES.find(b => b.id === place);
   const stage = wheatStage(state);
   const details: Record<string, { title: string; description: string; frame: string }> = {

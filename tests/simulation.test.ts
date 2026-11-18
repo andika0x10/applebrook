@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { advanceVillage, buildReason, calendar, createVillage, startBuilding, hasBuilding } from "../game/simulation.ts";
+import { advanceVillage, buildReason, calendar, createVillage, startBuilding, hasBuilding, outingReason, REGIONAL_ACTIVITIES, startOuting } from "../game/simulation.ts";
 import { applyOffline, parseSave } from "../game/persistence.ts";
-import { DAY_SECONDS, SEASON_SECONDS, STATIONS, findRoute, isBlocked, pointAt, tileAt } from "../game/world.ts";
+import { DAY_SECONDS, EAST_POND, LANDMARKS, LOWER_CROSSING, MARSH_POOLS, SEASON_SECONDS, STATIONS, findRoute, isBlocked, isCrossing, isRoad, isWater, pointAt, tileAt } from "../game/world.ts";
 
 test("a village runs unattended, harvests, transports, and earns money", () => {
   const state = createVillage();
@@ -90,6 +90,77 @@ test("routes to every work station cross the river at the bridge and avoid build
     for (const point of route.slice(0, -1)) { const tile = tileAt(point); assert.equal(isBlocked(tile.col, tile.row), false); }
     assert.deepEqual(route.at(-1), pointAt(station));
   }
+});
+
+test("the village paths reach every landmark without passing through obstacles", () => {
+  assert.equal(isBlocked(EAST_POND.col, EAST_POND.row), true);
+  assert.equal(isBlocked(82, 30), true);
+  for (const pool of MARSH_POOLS) assert.equal(isBlocked(pool.col, pool.row), true);
+  for (const landmark of LANDMARKS) {
+    assert.equal(isRoad(landmark.col, landmark.row), true);
+    const route = findRoute(pointAt(STATIONS.plaza), landmark);
+    assert.deepEqual(route.at(-1), pointAt(landmark));
+    for (const point of route) {
+      const { col, row } = tileAt(point);
+      assert.equal(isBlocked(col, row), false);
+    }
+  }
+});
+
+test("the boardwalk provides a second crossing between the lower riverbanks", () => {
+  const row = Math.floor(LOWER_CROSSING.row);
+  const westBank = { col: 29, row }, eastBank = { col: 55, row };
+  const route = findRoute(pointAt(westBank), eastBank).map(tileAt);
+  assert.deepEqual(route.at(-1), eastBank);
+  const water = route.filter(p => isWater(p.col, p.row));
+  assert.ok(water.length > 0);
+  assert.ok(water.every(p => Math.abs(p.row - LOWER_CROSSING.row) <= 0.5 && isCrossing(p.col, p.row) && !isBlocked(p.col, p.row)));
+});
+
+test("a fishing trip reserves its supplies once and pays only after the villager returns from the lake", () => {
+  const state = createVillage();
+  state.villagers[1].role = "gardener";
+  const initialCoins = state.coins, initialWood = state.inventory.wood;
+  const activity = REGIONAL_ACTIVITIES["east-pond"];
+  const worker = state.villagers[activity.worker], site = LANDMARKS[0];
+  assert.equal(startOuting(state, site.id), null);
+  assert.equal(state.outings[site.id]?.phase, "supplies");
+  assert.equal(state.inventory.wood, initialWood - activity.cost!.amount);
+  assert.ok(startOuting(state, site.id));
+  assert.equal(state.inventory.wood, initialWood - activity.cost!.amount);
+  for (let i = 0; i < 150 && state.outings[site.id]?.phase !== "returning"; i++) advanceVillage(state, 1);
+  assert.equal(state.outings[site.id]?.phase, "returning");
+  assert.deepEqual({ x: worker.x, y: worker.y }, pointAt(site));
+  assert.equal(state.coins, initialCoins);
+  advanceVillage(state, 3);
+
+  const restored = parseSave(JSON.stringify({ version: 1, savedAt: 1000, state }), 1000)?.state;
+  assert.ok(restored);
+  for (let i = 0; i < 150 && restored.outings[site.id]?.phase !== "done"; i++) advanceVillage(restored, 1);
+  const returned = restored.villagers[activity.worker];
+  assert.deepEqual({ x: returned.x, y: returned.y }, pointAt(STATIONS.market));
+  assert.equal(restored.coins, initialCoins + activity.reward.amount);
+  assert.ok(outingReason(restored, site.id));
+  advanceVillage(restored, 15);
+  assert.equal(restored.coins, initialCoins + activity.reward.amount);
+  assert.equal(restored.journal.filter(entry => entry.text.includes("kembali dari Telaga Timur")).length, 1);
+});
+
+test("regional jobs can run in parallel, survive the season change, and respect seasonal availability", () => {
+  const state = createVillage();
+  state.elapsed = SEASON_SECONDS * 3 - 55;
+  for (const site of LANDMARKS) assert.equal(startOuting(state, site.id), null);
+  const report = applyOffline(state, 0, 280_000);
+  assert.equal(report?.outings, LANDMARKS.length);
+  assert.ok(report.apples >= REGIONAL_ACTIVITIES["south-meadow"].reward.amount);
+  assert.equal(calendar(state).season, "winter");
+  for (const site of LANDMARKS) {
+    const outing = state.outings[site.id];
+    assert.ok(outing?.phase === "done");
+    assert.equal(outing.amount, REGIONAL_ACTIVITIES[site.id].reward.amount);
+  }
+  state.elapsed = SEASON_SECONDS * 3 + DAY_SECONDS;
+  assert.equal(outingReason(state, "south-meadow"), "Apel liar tersedia lagi setelah musim dingin.");
 });
 
 test("autumn apples are picked and physically delivered to the barn", () => {
