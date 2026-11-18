@@ -1,4 +1,4 @@
-import type { Inventory, Job, JobKind, Project, Station, Tile, VillageState, Villager } from "./types.ts";
+import type { Cargo, Job, JobKind, Project, ShipmentRoute, Station, Tile, VillageState, Villager } from "./types.ts";
 import { BUILD_SITES, DAY_SECONDS, DAYS_PER_SEASON, HOME_TILES, SEASONS, SEASON_NAMES, STATIONS, findRoute, pointAt } from "./world.ts";
 
 const NAMES = ["Mara", "Elsie", "Otto", "Theo", "Lily", "Finn", "Hazel", "Jasper", "Nora", "Arthur", "Rose", "Hugo", "Ivy", "Oscar", "Wren", "Felix", "Alice", "Milo", "Clara", "Robin", "Edith", "Leo", "Pearl", "Arlo"];
@@ -31,7 +31,7 @@ export function createVillage(): VillageState {
     version: 1, elapsed: 32, coins: 240, inventory: { wheat: 24, apples: 16, flour: 0, bread: 0, wood: 85 },
     fieldStock: { wheat: 0, apples: 0 }, marketStock: { wheat: 12, apples: 8, flour: 0, bread: 0, wood: 0 },
     millInput: 0, millOutput: 0, bakeryInput: 0, bakeryOutput: 0,
-    wheatGrowth: 0.93, appleGrowth: 0.3, priority: "balanced", speed: 1,
+    wheatGrowth: 0.93, appleGrowth: 0.3, priority: "balanced", speed: 1, priorityShipment: null,
     villagers: Array.from({ length: 12 }, (_, id) => makeVillager(id)), projects: [],
     journal: [], stats: { earned: 0, harvestedWheat: 0, harvestedApples: 0, breadBaked: 0, festivalYear: 0 }, nextEventId: 1,
   };
@@ -40,6 +40,19 @@ export function createVillage(): VillageState {
   return state;
 }
 export const hasBuilding = (state: VillageState, kind: string) => state.projects.some(p => p.kind === kind && p.complete);
+export function openingGoalSite(state: VillageState) {
+  if (state.stats.breadBaked > 0) return undefined;
+  const id = hasBuilding(state, "mill") ? "bakery" : "mill";
+  return BUILD_SITES.find(site => site.id === id);
+}
+
+export function wheatStage(state: VillageState) {
+  if (calendar(state).season === "winter") return -1;
+  if (state.wheatGrowth >= 1) return 3;
+  if (state.wheatGrowth >= 0.45) return 2;
+  if (state.wheatGrowth >= 0.15) return 1;
+  return 0;
+}
 export function buildReason(state: VillageState, id: string): string | null {
   const site = BUILD_SITES.find(b => b.id === id);
   if (!site) return "Lokasi tidak ditemukan.";
@@ -61,14 +74,55 @@ export function startBuilding(state: VillageState, id: string): string | null {
 function job(kind: JobKind, station: Station, duration: number, extra: Partial<Job> = {}): Job {
   return { kind, station, duration, remaining: duration, ...extra };
 }
+export const SHIPMENTS = {
+  "wheat-to-mill": { resource: "wheat", source: "barn", station: "barn", destination: "mill", minimum: 4, capacity: 16 },
+  "flour-to-bakery": { resource: "flour", source: "mill", station: "mill", destination: "bakery", minimum: 2, capacity: 12 },
+} as const;
+
+function matchesShipment(cargo: Pick<Cargo, "resource" | "destination">, route: ShipmentRoute) {
+  const { resource, destination } = SHIPMENTS[route];
+  return cargo.resource === resource && cargo.destination === destination;
+}
+
+function shipmentReady(state: VillageState, route: ShipmentRoute) {
+  const { minimum, capacity, destination } = SHIPMENTS[route];
+  const [stock, input] = route === "wheat-to-mill" ? [state.inventory.wheat, state.millInput] : [state.millOutput, state.bakeryInput];
+  return hasBuilding(state, destination) && stock >= minimum && input < capacity;
+}
+
+export function shipmentCarrier(state: VillageState, route: ShipmentRoute) {
+  return state.villagers.find(npc => npc.cargo && matchesShipment(npc.cargo, route));
+}
+
+export function shipmentStatus(state: VillageState, route: ShipmentRoute) {
+  if (shipmentCarrier(state, route)) return "in-transit";
+  const { resource, destination, capacity } = SHIPMENTS[route];
+  if (state.villagers.some(({ job }) => job?.kind === "collect" && job.resource === resource && job.destination === destination)) return "pickup";
+  if ((route === "wheat-to-mill" ? state.millInput : state.bakeryInput) >= capacity) return "full";
+  return shipmentReady(state, route) ? "waiting-carrier" : "waiting-stock";
+}
+
+export function setPriorityShipment(state: VillageState, route: ShipmentRoute | null) {
+  if (route && !hasBuilding(state, SHIPMENTS[route].destination)) return "Selesaikan bangunan tujuan terlebih dahulu.";
+  if (route && state.priorityShipment && state.priorityShipment !== route) return "Selesaikan atau batalkan arahan yang sedang aktif.";
+  state.priorityShipment = route;
+  return null;
+}
+
+function shipmentJob(route: ShipmentRoute) {
+  const { resource, source, station, destination } = SHIPMENTS[route];
+  return job("collect", station, 1.8, { resource, source, destination });
+}
+
 function hauling(state: VillageState): Job | null {
+  const priority = state.priorityShipment;
+  if (priority && shipmentStatus(state, priority) === "waiting-carrier") return shipmentJob(priority);
+  if (!state.stats.breadBaked && shipmentReady(state, "flour-to-bakery")) return shipmentJob("flour-to-bakery");
   if (state.fieldStock.wheat >= 2) return job("collect", "wheat", 1.8, { resource: "wheat", source: "field", destination: "barn" });
   if (state.fieldStock.apples >= 2) return job("collect", "orchard", 1.8, { resource: "apples", source: "field", destination: "barn" });
-  if (hasBuilding(state, "bakery") && state.millOutput >= 2 && state.bakeryInput < 12)
-    return job("collect", "mill", 1.8, { resource: "flour", source: "mill", destination: "bakery" });
+  if (shipmentReady(state, "flour-to-bakery")) return shipmentJob("flour-to-bakery");
   if (state.bakeryOutput >= 2) return job("collect", "bakery", 1.8, { resource: "bread", source: "bakery", destination: "market" });
-  if (hasBuilding(state, "mill") && state.inventory.wheat >= 4 && state.millInput < 16)
-    return job("collect", "barn", 1.8, { resource: "wheat", source: "barn", destination: "mill" });
+  if (shipmentReady(state, "wheat-to-mill")) return shipmentJob("wheat-to-mill");
   const reserve = state.priority === "stockpile" ? 24 : state.priority === "trade" ? 2 : 8;
   if (state.inventory.apples > reserve && state.marketStock.apples < 20)
     return job("collect", "barn", 1.8, { resource: "apples", source: "barn", destination: "market" });
@@ -81,12 +135,18 @@ function hauling(state: VillageState): Job | null {
 function chooseJob(state: VillageState, npc: Villager): Job {
   if (npc.cargo) return job("deliver", npc.cargo.destination, 1.6);
   const time = calendar(state);
-  if (time.night) return job("sleep", "home", 10);
+  const firstBread = !state.stats.breadBaked && state.projects.some(p => p.kind === "bakery");
+  const openingNight = time.night && time.dayTotal === 0 && firstBread;
+  // On opening day, the bakery and its delivery stay active for the first batch.
+  if (openingNight && npc.role === "hauler" && shipmentReady(state, "flour-to-bakery")) return shipmentJob("flour-to-bakery");
+  if (time.night && !(openingNight && npc.role === "baker")) return job("sleep", "home", 10);
   if (state.stats.festivalYear === time.year && time.season === "autumn" && time.day === 4 && time.hour >= 16)
     return job("festival", "plaza", 12);
   const project = state.projects.find(p => !p.complete);
   if (project && (npc.role === "carpenter" || (npc.role === "driver" && state.priority !== "trade")))
     return job("build", "plaza", 2, { projectId: project.id });
+  if (firstBread && npc.role === "baker")
+    return state.bakeryInput >= 2 && hasBuilding(state, "bakery") ? job("bake", "bakery", 8) : job("rest", "bakery", 2);
   if (npc.completed > 0 && npc.completed % 8 === 0) return job("rest", "plaza", 6);
   switch (npc.role) {
     case "farmer": case "driver":
@@ -169,10 +229,20 @@ function finishJob(state: VillageState, npc: Villager) {
         else if (destination === "mill") state.millInput += amount;
         else if (destination === "bakery") state.bakeryInput += amount;
         else state.marketStock[resource] += amount;
+        if (state.priorityShipment && matchesShipment(npc.cargo, state.priorityShipment)) {
+          state.priorityShipment = null;
+          addEntry(state, `${npc.name} menyelesaikan kiriman yang didahulukan.`, "trade");
+        }
         npc.cargo = null;
       } break;
     case "mill": if (state.millInput >= 4) { state.millInput -= 4; state.millOutput += 3; } break;
-    case "bake": if (state.bakeryInput >= 2) { state.bakeryInput -= 2; state.bakeryOutput += 4; state.stats.breadBaked += 4; } break;
+    case "bake":
+      if (state.bakeryInput >= 2) {
+        state.bakeryInput -= 2; state.bakeryOutput += 4;
+        if (!state.stats.breadBaked) addEntry(state, `${npc.name} mengeluarkan roti pertama dari oven!`);
+        state.stats.breadBaked += 4;
+      }
+      break;
     case "sell": {
       const prices = { bread: 8, flour: 5, apples: 3, wheat: 2, wood: 1 };
       const resource = (["bread", "flour", "apples", "wheat"] as const).find(r => state.marketStock[r] > 0);
@@ -230,8 +300,10 @@ export function advanceVillage(state: VillageState, seconds: number) {
 export function activityText(npc: Villager): string {
   if (!npc.job) return "Menyiapkan kegiatan berikutnya";
   if (npc.route.length) {
+    if (npc.job.kind === "build") return "Menuju lokasi pembangunan";
     if (npc.cargo) return `Mengantar ${npc.cargo.amount} ${({ wheat: "gandum", apples: "apel", flour: "tepung", bread: "roti", wood: "kayu" })[npc.cargo.resource]}`;
     return `Menuju ${({ wheat: "ladang gandum", orchard: "kebun apel", barn: "lumbung", market: "pasar", mill: "penggilingan", bakery: "toko roti", forest: "hutan", home: "rumah", plaza: "alun-alun" })[npc.job.station]}`;
   }
+  if (npc.job.kind === "rest" && npc.job.station === "bakery") return "Menyiapkan dapur dan menunggu tepung";
   return ({ plant: "Merawat tanaman gandum", harvest: "Memanen gandum", tend: "Merawat pohon apel", pick: "Memetik apel", collect: "Memuat hasil produksi", deliver: "Menyimpan kiriman", mill: "Menggiling gandum", bake: "Memanggang roti", sell: "Melayani pembeli", build: "Membangun untuk desa", wood: "Mengumpulkan kayu", rest: "Beristirahat di alun-alun", sleep: "Beristirahat di rumah", festival: "Menikmati Festival Panen" })[npc.job.kind];
 }

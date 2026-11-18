@@ -25,6 +25,7 @@ npm run assets       # Regenerate original pixel sprites and four terrain backgr
 - Start with 12 named residents, wheat fields, an apple orchard, four houses, a barn, a tractor, and a village market.
 - Open **Bangun**, or click a plot sign, to commission a building at its marked location. The carpenter and tractor driver construct it automatically.
 - Build a mill to turn wheat into flour, then a bakery to make bread. Haulers physically pick up and deliver batches between stations; merchants sell only delivered goods.
+- Follow the opening goal through the first batch of bread. Use **Dahulukan kiriman** on a production building or in **Prioritas** to move one wheat or flour delivery to the front of the queue.
 - Cottages add four residents each, up to 24. An orchard expansion increases the autumn apple harvest.
 - Select a resident to see their work, carried goods, and route, or follow them with the camera.
 - Change **Prioritas** to balance reserves and trade. Prepare the mill, bakery, 16 residents, and 300 coins in trade revenue for the automatic autumn harvest festival.

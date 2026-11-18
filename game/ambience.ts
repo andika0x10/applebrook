@@ -24,5 +24,25 @@ export class Ambience {
     };
     bird(); this.interval = setInterval(bird, 4700);
   }
+  playMilestone(kind: "build" | "bread") {
+    const context = this.context;
+    if (!context || context.state !== "running" || document.hidden) return;
+
+    const notes = kind === "bread" ? [523.25, 659.25, 783.99] : [392, 523.25];
+    const start = context.currentTime;
+    for (const [index, frequency] of notes.entries()) {
+      const time = start + index * 0.095;
+      const note = context.createOscillator();
+      const volume = context.createGain();
+      note.frequency.value = frequency;
+      volume.gain.setValueAtTime(0.0001, time);
+      volume.gain.exponentialRampToValueAtTime(0.05, time + 0.02);
+      volume.gain.exponentialRampToValueAtTime(0.0001, time + 0.22);
+      note.connect(volume).connect(context.destination);
+      note.start(time);
+      note.stop(time + 0.23);
+      note.onended = () => { note.disconnect(); volume.disconnect(); };
+    }
+  }
   stop() { if (this.interval) clearInterval(this.interval); this.interval = null; this.noise?.stop(); this.noise = null; void this.context?.close(); this.context = null; }
 }

@@ -2,6 +2,7 @@ export type Season = "spring" | "summer" | "autumn" | "winter";
 export type Resource = "wheat" | "apples" | "flour" | "bread" | "wood";
 export type Inventory = Record<Resource, number>;
 export type Priority = "balanced" | "stockpile" | "trade";
+export type ShipmentRoute = "wheat-to-mill" | "flour-to-bakery";
 export type Speed = 0 | 1 | 2 | 4;
 export type BuildingKind = "mill" | "bakery" | "cottage" | "orchard";
 export type Role = "farmer" | "gardener" | "hauler" | "merchant" | "driver" | "carpenter" | "miller" | "baker";
@@ -27,6 +28,7 @@ export interface VillageState {
   fieldStock: { wheat: number; apples: number }; marketStock: Inventory;
   millInput: number; millOutput: number; bakeryInput: number; bakeryOutput: number;
   wheatGrowth: number; appleGrowth: number; priority: Priority; speed: Speed;
+  priorityShipment: ShipmentRoute | null;
   villagers: Villager[]; projects: Project[]; journal: JournalEntry[];
   stats: { earned: number; harvestedWheat: number; harvestedApples: number; breadBaked: number; festivalYear: number };
   nextEventId: number;

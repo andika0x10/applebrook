@@ -1,7 +1,8 @@
 import Phaser from "phaser";
 import type { VillageController } from "./controller.ts";
-import type { Season, Villager } from "./types.ts";
-import { calendar } from "./simulation.ts";
+import type { Point, Season, Villager } from "./types.ts";
+import { calendar, openingGoalSite, SHIPMENTS, shipmentCarrier, wheatStage } from "./simulation.ts";
+import { villagerFrame } from "./sprites.ts";
 import { BUILD_SITES, HOME_TILES, STATIONS, WORLD_HEIGHT, WORLD_WIDTH, pointAt } from "./world.ts";
 
 interface Actor {
@@ -18,6 +19,7 @@ export class VillageScene extends Phaser.Scene {
   private structures = new Map<string, Phaser.GameObjects.Image>();
   private hedges: Phaser.GameObjects.Image[] = [];
   private hoverLabel!: Phaser.GameObjects.Text;
+  private goalLabel!: Phaser.GameObjects.Text;
   private fieldBales: Phaser.GameObjects.Image[] = [];
   private placeMarkers = new Map<string, Phaser.GameObjects.Container>();
   private windowLights: Phaser.GameObjects.Rectangle[] = [];
@@ -33,6 +35,7 @@ export class VillageScene extends Phaser.Scene {
   private lastEarned = 0;
   private lastHarvest = 0;
   private lastApples = 0;
+  private lastBread = 0;
   private removeCamera?: () => void;
   private reducedMotion = false;
   private cursors?: Pick<Phaser.Types.Input.Keyboard.CursorKeys, "left" | "right" | "up" | "down">;
@@ -53,21 +56,26 @@ export class VillageScene extends Phaser.Scene {
     this.lastEarned = this.controller.state.stats.earned;
     this.lastHarvest = this.controller.state.stats.harvestedWheat;
     this.lastApples = this.controller.state.stats.harvestedApples;
+    this.lastBread = this.controller.state.stats.breadBaked;
     this.terrain = this.add.image(0, 0, `terrain-${this.season}`).setOrigin(0).setScale(2).setDepth(-1000);
     this.decorate(); this.createVillage(); this.createControls();
     this.selection = this.add.graphics().setDepth(2500);
     this.atmosphere = this.add.graphics().setDepth(2600);
     this.lighting = this.add.rectangle(0, 0, 4000, 2400, 0x243a62, 0).setOrigin(0).setScrollFactor(0).setDepth(3000);
     this.hoverLabel = this.add.text(0, 0, "", {
-      fontFamily: "Pixelify, sans-serif", fontSize: "18px", color: "#fff3cc",
+      fontFamily: "Atkinson, sans-serif", fontSize: "15px", color: "#fff3cc",
       backgroundColor: "#202c27", padding: { x: 8, y: 4 },
     }).setOrigin(0.5, 1).setDepth(3100).setVisible(false);
+    this.goalLabel = this.add.text(0, 0, "", {
+      fontFamily: "Atkinson, sans-serif", fontStyle: "bold", fontSize: "14px", color: "#252e24",
+      backgroundColor: "#ffe5aa", padding: { x: 8, y: 4 },
+    }).setOrigin(0.5, 1).setDepth(3050).setVisible(false);
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT).setRoundPixels(true);
     this.homeCamera();
     this.removeCamera = this.controller.onCamera(command => {
       if (command.type === "zoom") this.zoomBy(command.delta);
       else if (command.type === "home") { this.controller.followNpc(false); this.homeCamera(); }
-      else { this.controller.followNpc(false); this.cameras.main.centerOn(command.x, command.y); }
+      else { this.controller.followNpc(false); this.focusCamera(command.x, command.y, command.revealPanel ? "reveal" : "center"); }
     });
     this.scale.on("resize", this.homeCamera, this);
     this.events.once("shutdown", () => { this.removeCamera?.(); this.scale.off("resize", this.homeCamera, this); });
@@ -158,15 +166,15 @@ export class VillageScene extends Phaser.Scene {
     for (const site of BUILD_SITES) {
       const p = pointAt({ col: site.col, row: site.row });
       const shadow = this.add.ellipse(0, 0, 45, 20, 0x768750, 0.22);
-      const sign = this.add.image(0, -10, "village", "build-sign").setScale(site.id === "mill" ? 1.6 : 1.1);
-      const marker = this.add.container(p.x, p.y, [shadow, sign]).setDepth(p.y).setSize(52, 65).setInteractive({ useHandCursor: true });
+      const sign = this.add.image(0, -13, "village", `plot-${site.kind}`).setScale(site.id === "mill" ? 1.9 : 1.45);
+      const marker = this.add.container(p.x, p.y - 9, [shadow, sign]).setDepth(p.y).setSize(76, 76).setInteractive({ useHandCursor: true });
       this.target(marker, site.name, () => this.controller.selectPlace(site.id));
       marker.on("pointerover", () => sign.setTint(0xffefb0)); marker.on("pointerout", () => sign.clearTint());
       this.placeMarkers.set(site.id, marker);
     }
     this.syncProjects();
   }
-  private syncProjects() {
+  private syncProjects(celebrate = false) {
     for (const project of this.controller.state.projects) {
       const existing = this.structures.get(project.id), frame = project.complete ? project.kind === "cottage" ? "house-1" : project.kind === "orchard" ? "orchard-shed" : project.kind : "construction";
       if (existing?.getData("base-frame") === frame) continue;
@@ -177,6 +185,7 @@ export class VillageScene extends Phaser.Scene {
       if (project.complete) {
         if (project.kind === "mill") this.millSails = this.add.image(p.x, p.y - 144, "village", "mill-sails").setScale(2).setDepth(p.y + 2);
         if (project.kind === "orchard") for (let i = 0; i < 6; i++) this.tree(p.x - 45 + i % 3 * 70, p.y - 110 - Math.floor(i / 3) * 85, true, i % 3);
+        if (celebrate) this.showResult(p, "Selesai", "tool-hammer");
       }
     }
   }
@@ -194,14 +203,21 @@ export class VillageScene extends Phaser.Scene {
       this.wasDragged = true;
       this.cameras.main.setScroll(this.dragStart.scrollX - dx / this.cameras.main.zoom, this.dragStart.scrollY - dy / this.cameras.main.zoom);
     });
-    this.input.on("pointerup", (_pointer: Phaser.Input.Pointer, objects: Phaser.GameObjects.GameObject[]) => {
+    this.input.on("pointerup", (pointer: Phaser.Input.Pointer, objects: Phaser.GameObjects.GameObject[]) => {
       if (this.dragStart && !this.wasDragged) {
         const select = objects[0]?.getData("select") as (() => void) | undefined;
-        if (select) select();
+        if (select) {
+          select();
+          if (this.scale.width <= 680) {
+            const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+            this.focusCamera(point.x, point.y + 18, "reveal");
+          }
+        }
         else this.controller.selectPlace(null);
       }
       this.dragStart = null;
     });
+    this.input.on("pointerupoutside", () => { this.dragStart = null; });
     this.input.on("wheel", (_p: unknown, _objects: unknown, _dx: number, dy: number) => this.zoomBy(dy < 0 ? 0.1 : -0.1));
     // Do not capture Space globally: focused HTML buttons must retain native activation.
     this.cursors = this.input.keyboard?.addKeys({
@@ -211,10 +227,39 @@ export class VillageScene extends Phaser.Scene {
   }
   private homeCamera() {
     const camera = this.cameras.main;
-    camera.setZoom(this.scale.width < 681 ? 0.66 : Phaser.Math.Clamp(Math.min(this.scale.width / 1470, this.scale.height / 940), 0.6, 1.25));
-    camera.centerOn(this.scale.width < 681 ? 490 : 864, 535);
+    if (this.scale.width <= 680) {
+      const goal = openingGoalSite(this.controller.state);
+      const point = pointAt(goal ?? STATIONS.market);
+      this.setCameraZoom(Phaser.Math.Clamp(camera.width / 652, 0.56, 0.82));
+      camera.centerOn(goal?.id === "mill" ? point.x + 203 : point.x - 45, point.y - 166);
+      return;
+    }
+    this.setCameraZoom(Phaser.Math.Clamp(Math.min(camera.width / 1470, camera.height / 940), 0.6, 1.25));
+    camera.centerOn(864, 535);
   }
-  private zoomBy(delta: number) { this.cameras.main.setZoom(Phaser.Math.Clamp(this.cameras.main.zoom + delta, 0.45, 1.65)); }
+  private focusCamera(x: number, y: number, mode: "center" | "reveal" | "follow" = "center") {
+    const camera = this.cameras.main;
+    const revealPanel = mode !== "center";
+    if (revealPanel && this.scale.width <= 680) {
+      const minimumY = this.scale.width <= 360 ? 212 : 181;
+      const targetY = Math.min(camera.height * 0.46, Math.max(minimumY, camera.height * 0.32));
+      if (mode === "reveal") {
+        // Fit the plot above the sheet by zooming in within the terrain bounds.
+        const zoomAbove = targetY / Math.max(1, y);
+        const zoomBelow = (camera.height - targetY) / Math.max(1, WORLD_HEIGHT - y);
+        this.setCameraZoom(Math.max(camera.zoom, 1, zoomAbove, zoomBelow));
+      }
+      camera.centerOn(x, y + (camera.height / 2 - targetY) / camera.zoom);
+    } else if (revealPanel && this.scale.width <= 920) {
+      camera.centerOn(x - 105 / camera.zoom, y);
+    } else camera.centerOn(x, y);
+  }
+  private setCameraZoom(zoom: number) {
+    const camera = this.cameras.main;
+    const minZoom = Math.max(0.45, camera.width / WORLD_WIDTH, camera.height / WORLD_HEIGHT);
+    camera.setZoom(Phaser.Math.Clamp(zoom, minZoom, Math.max(minZoom, 1.65)));
+  }
+  private zoomBy(delta: number) { this.setCameraZoom(this.cameras.main.zoom + delta); }
   update(time: number, delta: number) {
     if (!this.terrain) return;
     this.controller.tick(delta / 1000);
@@ -228,21 +273,21 @@ export class VillageScene extends Phaser.Scene {
         building.setFrame(this.season === "winter" && this.textures.get("village").has(`${base}-winter`) ? `${base}-winter` : base);
       }
     }
-    const stage = calendarNow.season === "winter" ? -1 : Math.min(3, Math.floor(state.wheatGrowth * 4));
+    const stage = wheatStage(state);
     if (stage !== this.cropStage) {
       this.cropStage = stage;
       this.crops.forEach((crop, index) => {
-        const varied = Math.max(0, stage - (index % 11 < 5 && stage > 0 && index % 7 < 3 ? 1 : 0));
+        const varied = stage === 2 && index % 7 < 2 ? 1 : Math.max(0, stage);
         crop.setFrame("wheat-" + varied).setVisible(stage >= 0);
       });
     }
     this.fieldBales.forEach((bale, i) => bale.setVisible(state.fieldStock.wheat > i * 4));
-    this.syncProjects();
+    this.syncProjects(!snapshot.offline);
     for (const decoration of this.festivalDecor) decoration.setVisible(calendarNow.season === "autumn" && calendarNow.day === 4 && state.stats.festivalYear === calendarNow.year);
     for (const npc of state.villagers) {
       let actor = this.actors.get(npc.id);
       if (!actor) {
-        const sprite = this.add.sprite(npc.x, npc.y, "village", `npc-${npc.color}-down-0`).setOrigin(0.5, 1).setScale(2);
+        const sprite = this.add.sprite(npc.x, npc.y, "village", villagerFrame(npc, "down", 0)).setOrigin(0.5, 1).setScale(2);
         sprite.setInteractive({ useHandCursor: true });
         this.target(sprite, npc.name, () => this.controller.selectNpc(npc.id));
         const shadow = this.add.ellipse(npc.x, npc.y - 1, 24, 8, 0x374933, 0.22);
@@ -254,7 +299,7 @@ export class VillageScene extends Phaser.Scene {
       const frame = (moving || working) && !this.reducedMotion ? Math.floor(state.elapsed * (moving ? 7 : 4) + npc.id) % 3 : 0;
       const isTractor = npc.role === "driver";
       const tractorFrame = npc.facing === "up" || npc.facing === "down" ? "tractor-" + npc.facing : "tractor";
-      actor.sprite.setFrame(isTractor ? tractorFrame : `npc-${npc.color}-${npc.facing}-${frame}`)
+      actor.sprite.setFrame(isTractor ? tractorFrame : villagerFrame(npc, npc.facing, frame))
         .setScale(isTractor ? 1.75 : 2).setFlipX(isTractor && npc.facing === "left");
       actor.sprite.setPosition(Math.round(npc.x), Math.round(npc.y) - (working && frame === 1 ? 2 : 0)).setDepth(npc.y);
       const sleeping = npc.job?.kind === "sleep" && !npc.route.length;
@@ -262,14 +307,21 @@ export class VillageScene extends Phaser.Scene {
       actor.cargo.setVisible(!!npc.cargo && !sleeping);
       if (npc.cargo) actor.cargo.setFrame(`cargo-${npc.cargo.resource}`).setPosition(npc.x + 12, npc.y - 12).setDepth(npc.y + 1);
     }
-    this.showYield();
+    this.showYield(!snapshot.offline);
     this.selection.clear();
+    if (state.priorityShipment) {
+      const carrier = shipmentCarrier(state, state.priorityShipment);
+      if (carrier && carrier.id !== snapshot.selectedNpc) this.drawRoute(carrier, 0xffe38b, 0.85);
+      const destination = SHIPMENTS[state.priorityShipment].destination;
+      const point = pointAt(STATIONS[destination]);
+      this.selection.lineStyle(2, 0xffe38b, 0.85).strokeEllipse(point.x, point.y, 48, 19);
+    }
     if (snapshot.selectedNpc !== null) {
       const npc = state.villagers.find(v => v.id === snapshot.selectedNpc);
       if (npc) {
         this.selection.lineStyle(2, 0xfff2b4, 1).strokeEllipse(npc.x, npc.y, 36, 14);
-        if (snapshot.followNpc) this.cameras.main.centerOn(npc.x, npc.y);
-        if (npc.route.length) { this.selection.lineStyle(2, 0xfff4cc, 0.55).beginPath().moveTo(npc.x, npc.y); for (const p of npc.route) this.selection.lineTo(p.x, p.y); this.selection.strokePath(); }
+        if (snapshot.followNpc) this.focusCamera(npc.x, npc.y, "follow");
+        this.drawRoute(npc, 0xfff4cc, 0.55);
       }
     }
     const plot = BUILD_SITES.find(site => site.id === snapshot.selectedPlace);
@@ -277,13 +329,23 @@ export class VillageScene extends Phaser.Scene {
       const p = pointAt(plot);
       this.selection.lineStyle(2, 0xffe88a, 0.95).strokeEllipse(p.x, p.y, 68, 25);
     }
+    const goal = openingGoalSite(state);
+    const compactSelection = this.scale.width <= 360 && goal?.id === snapshot.selectedPlace;
+    this.goalLabel.setVisible(!!goal && !snapshot.offline && !compactSelection);
+    if (goal) {
+      const point = pointAt(goal);
+      const completed = state.projects.some(project => project.id === goal.id && project.complete);
+      this.goalLabel.setText(goal.name).setPosition(point.x, point.y - (completed ? 126 : 55))
+        .setScale(1 / this.cameras.main.zoom);
+    }
     const hour = calendarNow.hour + calendarNow.minute / 60;
     const night = hour >= 21 || hour < 6, dusk = hour >= 17 && hour < 21;
     this.lighting.setFillStyle(night ? 0x243a62 : 0xb87d51, night ? 0.33 : dusk ? (hour - 17) / 4 * 0.18 : 0);
     for (const light of this.windowLights) light.setAlpha(night || dusk ? 0.85 : 0);
     if (this.millSails && !this.reducedMotion) this.millSails.setRotation(state.elapsed / 14);
     this.drawAtmosphere(time, state.villagers);
-    if (this.cursors && !snapshot.followNpc && !snapshot.offline) {
+    if (this.cursors && !snapshot.followNpc && !snapshot.offline &&
+        (document.activeElement === document.body || document.activeElement?.closest(".phaser-world"))) {
       const camera = this.cameras.main, amount = delta * 0.55 / camera.zoom;
       if (this.cursors.left.isDown) camera.scrollX -= amount;
       if (this.cursors.right.isDown) camera.scrollX += amount;
@@ -291,10 +353,16 @@ export class VillageScene extends Phaser.Scene {
       if (this.cursors.down.isDown) camera.scrollY += amount;
     }
   }
-  private isWorking(npc: Villager) {
-    return !!npc.job && !npc.route.length && ["plant", "harvest", "pick", "tend", "build", "wood"].includes(npc.job.kind);
+  private drawRoute(npc: Villager, color: number, opacity: number) {
+    if (!npc.route.length) return;
+    this.selection.lineStyle(2, color, opacity).beginPath().moveTo(npc.x, npc.y);
+    for (const point of npc.route) this.selection.lineTo(point.x, point.y);
+    this.selection.strokePath();
   }
-  private showYield() {
+  private isWorking(npc: Villager) {
+    return !!npc.job && !npc.route.length && ["plant", "harvest", "pick", "tend", "build", "wood", "bake", "mill"].includes(npc.job.kind);
+  }
+  private showYield(celebrate: boolean) {
     const { stats } = this.controller.state;
     const events = [
       { station: "market", amount: stats.earned - this.lastEarned, icon: "hud-coin" },
@@ -306,15 +374,19 @@ export class VillageScene extends Phaser.Scene {
     this.lastApples = stats.harvestedApples;
     for (const event of events) {
       if (event.amount <= 0) continue;
-      const point = pointAt(STATIONS[event.station]);
-      const text = this.add.text(10, 0, "+" + event.amount, {
-        fontFamily: "Pixelify, sans-serif", fontSize: "22px", color: "#fff2a9", stroke: "#2e3223", strokeThickness: 4,
-      }).setOrigin(0, 0.5);
-      const icon = this.add.image(-2, 0, "village", event.icon).setScale(1.4);
-      const popup = this.add.container(point.x, point.y - 28, [icon, text]).setDepth(2550);
-      this.tweens.add({ targets: popup, y: popup.y - (this.reducedMotion ? 0 : 25), alpha: 0,
-        duration: 1050, ease: "Quad.easeIn", onComplete: () => popup.destroy() });
+      this.showResult(pointAt(STATIONS[event.station]), "+" + event.amount, event.icon);
     }
+    if (celebrate && this.lastBread === 0 && stats.breadBaked > 0) this.showResult(pointAt(STATIONS.bakery), "Roti pertama!", "cargo-bread");
+    this.lastBread = stats.breadBaked;
+  }
+  private showResult(point: Point, label: string, frame: string) {
+    const text = this.add.text(12, 0, label, {
+      fontFamily: "Atkinson, sans-serif", fontStyle: "bold", fontSize: "20px", color: "#fff2a9", stroke: "#2e3223", strokeThickness: 4,
+    }).setOrigin(0, 0.5);
+    const icon = this.add.image(-2, 0, "village", frame).setScale(1.4);
+    const popup = this.add.container(point.x, point.y - 36, [icon, text]).setDepth(2550);
+    this.tweens.add({ targets: popup, y: popup.y - (this.reducedMotion ? 0 : 25), alpha: 0,
+      duration: 1200, ease: "Quad.easeIn", onComplete: () => popup.destroy() });
   }
   private drawAtmosphere(time: number, villagers: Villager[]) {
     this.atmosphere.clear();

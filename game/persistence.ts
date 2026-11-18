@@ -1,5 +1,5 @@
 import type { OfflineReport, VillageState } from "./types.ts";
-import { createVillage, advanceVillage, addEntry } from "./simulation.ts";
+import { createVillage, advanceVillage, addEntry, SHIPMENTS } from "./simulation.ts";
 import { BUILD_SITES, SEASON_SECONDS, WORLD_HEIGHT, WORLD_WIDTH } from "./world.ts";
 
 export const SAVE_KEY = "applebrook.village.v1";
@@ -18,6 +18,8 @@ export function parseSave(raw: string | null, now = Date.now()): SaveEnvelope | 
     if (!["millInput", "millOutput", "bakeryInput", "bakeryOutput", "wheatGrowth", "appleGrowth", "nextEventId"].every(k => finite(s[k]))) return null;
     if (!finite(s.wheatGrowth, 1) || !finite(s.appleGrowth, 1)) return null;
     if (![0, 1, 2, 4].includes(s.speed as number) || !["balanced", "stockpile", "trade"].includes(s.priority as string)) return null;
+    const priorityShipment = s.priorityShipment ?? null;
+    if (priorityShipment !== null && (typeof priorityShipment !== "string" || !Object.hasOwn(SHIPMENTS, priorityShipment))) return null;
     if (!Array.isArray(s.villagers) || s.villagers.length < 12 || s.villagers.length > 24) return null;
     const roles = ["farmer", "gardener", "hauler", "merchant", "driver", "carpenter", "miller", "baker"];
     const stations = ["wheat", "orchard", "barn", "market", "mill", "bakery", "forest", "home", "plaza"];
@@ -46,6 +48,7 @@ export function parseSave(raw: string | null, now = Date.now()): SaveEnvelope | 
     }
     if (!isObject(s.stats) || !["earned", "harvestedWheat", "harvestedApples", "breadBaked", "festivalYear"].every(k => finite((s.stats as Record<string, unknown>)[k]))) return null;
     if (!Array.isArray(s.journal) || s.journal.length > 50 || !s.journal.every(e => isObject(e) && finite(e.id) && finite(e.day) && typeof e.text === "string" && e.text.length < 500 && ["village", "trade", "build", "season"].includes(e.kind as string))) return null;
+    s.priorityShipment = priorityShipment;
     return save as unknown as SaveEnvelope;
   } catch { return null; }
 }

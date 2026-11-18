@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { advanceVillage, calendar, createVillage, startBuilding, hasBuilding } from "../game/simulation.ts";
+import { advanceVillage, buildReason, calendar, createVillage, startBuilding, hasBuilding } from "../game/simulation.ts";
 import { applyOffline, parseSave } from "../game/persistence.ts";
 import { DAY_SECONDS, SEASON_SECONDS, STATIONS, findRoute, isBlocked, pointAt, tileAt } from "../game/world.ts";
 
@@ -23,6 +23,30 @@ test("building spends once, completes through workers, and opens the bread chain
   assert.equal(startBuilding(state, "bakery"), null);
   advanceVillage(state, 600);
   assert.ok(hasBuilding(state, "bakery")); assert.ok(state.stats.breadBaked > 0);
+});
+function playOpening(step: number, millDelay: number, bakeryDelay: number, timeLimit: number) {
+  const state = createVillage();
+  let bakeryReadyAt: number | undefined;
+  for (let time = 0; time < timeLimit && !state.stats.breadBaked; time += step) {
+    if (time >= millDelay && !state.projects.length) assert.equal(startBuilding(state, "mill"), null);
+    if (bakeryReadyAt === undefined && !buildReason(state, "bakery")) bakeryReadyAt = time;
+    if (bakeryReadyAt !== undefined && time >= bakeryReadyAt + bakeryDelay && state.projects.length === 1)
+      assert.equal(startBuilding(state, "bakery"), null);
+    advanceVillage(state, step);
+  }
+  return state;
+}
+test("a new village bakes its first bread within four minutes at normal speed", () => {
+  for (const step of [1, 1 / 60]) {
+    const state = playOpening(step, 0, 0, 240);
+    assert.ok(state.stats.breadBaked > 0, `first bread at step ${step}`);
+    assert.equal(state.journal.filter(entry => entry.text.includes("roti pertama")).length, 1);
+  }
+});
+test("the bakery finishes its first batch within five minutes even when the player takes time to build", () => {
+  const state = playOpening(0.1, 60, 20, 300);
+  assert.equal(calendar(state).night, true);
+  assert.ok(state.stats.breadBaked > 0);
 });
 test("new homes add four residents and never exceed 24", () => {
   const state = createVillage(); state.coins = 5000; state.inventory.wood = 250;

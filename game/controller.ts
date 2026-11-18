@@ -1,8 +1,8 @@
-import type { Priority, Snapshot, Speed, VillageState } from "./types.ts";
-import { advanceVillage, startBuilding } from "./simulation.ts";
+import type { Priority, ShipmentRoute, Snapshot, Speed, VillageState } from "./types.ts";
+import { advanceVillage, setPriorityShipment, startBuilding } from "./simulation.ts";
 import { applyOffline, loadVillage, SAVE_KEY } from "./persistence.ts";
 
-export type CameraCommand = { type: "zoom"; delta: number } | { type: "home" } | { type: "pan"; x: number; y: number };
+export type CameraCommand = { type: "zoom"; delta: number } | { type: "home" } | { type: "pan"; x: number; y: number; revealPanel?: boolean };
 export class VillageController {
   state: VillageState;
   private listeners = new Set<() => void>();
@@ -33,6 +33,11 @@ export class VillageController {
   }
   setSpeed(speed: Speed) { this.state.speed = speed; this.publish(); this.save(); }
   setPriority(priority: Priority) { this.state.priority = priority; this.publish(); this.save(); }
+  prioritizeShipment(route: ShipmentRoute | null) {
+    const reason = setPriorityShipment(this.state, route);
+    if (!reason) { this.publish(); this.save(); }
+    return reason;
+  }
   build(id: string) { const result = startBuilding(this.state, id); this.publish(); this.save(); return result; }
   selectNpc(id: number | null) { this.snapshot = { ...this.snapshot, selectedNpc: id, selectedPlace: null, followNpc: false }; this.publish(); }
   selectPlace(id: string | null) { this.snapshot = { ...this.snapshot, selectedPlace: id, selectedNpc: null, followNpc: false }; this.publish(); }

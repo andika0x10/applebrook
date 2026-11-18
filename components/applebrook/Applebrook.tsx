@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type Phaser from "phaser";
 import { VillageController } from "@/game/controller";
-import type { OfflineReport, Speed } from "@/game/types";
+import type { OfflineReport, Speed, VillageState } from "@/game/types";
 import { Ambience } from "@/game/ambience";
-import { calendar, festivalGoals, hasBuilding } from "@/game/simulation";
-import { BUILD_SITES, SEASON_NAMES, pointAt } from "@/game/world";
+import { buildReason, calendar, festivalGoals, openingGoalSite, shipmentCarrier } from "@/game/simulation";
+import { BUILD_SITES, SEASON_NAMES, STATIONS, pointAt } from "@/game/world";
 import Icon from "./Icons";
 import PixelSprite from "./PixelSprite";
 import MiniMap from "./MiniMap";
@@ -21,6 +21,24 @@ const TOOLS: { id: Panel; label: string; sprite: string; shortcut?: string }[] =
   { id: "journal", label: "Catatan", sprite: "tool-book" },
 ];
 const SPEEDS: Speed[] = [1, 2, 4];
+
+function openingStatus(state: VillageState, id: string) {
+  const project = state.projects.find(item => item.id === id);
+  if (!project) return buildReason(state, id) ?? "Pilih lokasi untuk mulai membangun.";
+  if (!project.complete) {
+    const worker = state.villagers.find(npc => npc.job?.projectId === id && !npc.route.length);
+    if (worker) return `${worker.name} sedang membangun.`;
+    return "Menunggu tukang tiba di lokasi.";
+  }
+  const baker = state.villagers.find(npc => npc.job?.kind === "bake" && !npc.route.length);
+  if (baker) return `${baker.name} sedang memanggang.`;
+  if (state.bakeryInput >= 2) return "Tepung sudah tiba di dapur.";
+  const carrier = shipmentCarrier(state, "flour-to-bakery");
+  if (carrier) return `${carrier.name} sedang mengantar tepung.`;
+  if (state.millOutput >= 2) return "Tepung siap diangkut dari Penggilingan.";
+  if (state.millInput >= 4) return "Gandum siap digiling menjadi tepung.";
+  return "Penggilingan menunggu kiriman gandum.";
+}
 
 function OfflineModal({ report, onClose }: { report: OfflineReport; onClose: () => void }) {
   const button = useRef<HTMLButtonElement>(null);
@@ -60,20 +78,39 @@ function GameInterface({ controller }: { controller: VillageController }) {
   const date = calendar(state);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
+  const [timeOptionsOpen, setTimeOptionsOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [sound, setSound] = useState(false);
   const ambience = useRef<Ambience | null>(null);
   const lastSpeed = useRef<Speed>(state.speed || 1);
+  const lastVillage = useRef(state);
+  const goalButton = useRef<HTMLButtonElement>(null);
+  const timeToggle = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+
   const showPanel = useCallback((next: Panel) => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.matches("button") && !focused.closest("aside")) {
+      returnFocus.current = focused.closest(".time-extra") && timeToggle.current?.getClientRects().length ? timeToggle.current : focused;
+    }
     controller.selectPlace(null);
+    setTimeOptionsOpen(false);
     setPanel(current => current === next ? null : next);
   }, [controller]);
+
+  const restoreFocus = useCallback(() => {
+    const target = returnFocus.current;
+    (target?.isConnected && target.getClientRects().length ? target : goalButton.current)?.focus();
+    returnFocus.current = null;
+  }, []);
 
   const closeAll = useCallback(() => {
     setPanel(null);
     setMapOpen(false);
+    setTimeOptionsOpen(false);
     controller.selectPlace(null);
-  }, [controller]);
+    restoreFocus();
+  }, [controller, restoreFocus]);
 
   const togglePause = useCallback(() => {
     const speed = controller.state.speed;
@@ -94,6 +131,25 @@ function GameInterface({ controller }: { controller: VillageController }) {
   useEffect(() => () => ambience.current?.stop(), []);
 
   useEffect(() => {
+    const previous = lastVillage.current;
+    lastVillage.current = state;
+    if (snapshot.offline) return;
+    if (previous.stats.breadBaked === 0 && state.stats.breadBaked > 0) {
+      setToast("Roti pertama Applebrook sudah matang!");
+      ambience.current?.playMilestone("bread");
+      return;
+    }
+    const finished = state.projects.find(project => project.complete && !previous.projects.some(old => old.id === project.id && old.complete));
+    if (finished) {
+      setToast(BUILD_SITES.find(site => site.id === finished.id)!.name + " selesai!");
+      ambience.current?.playMilestone("build");
+    } else if (previous.priorityShipment && !state.priorityShipment) {
+      const carrier = shipmentCarrier(previous, previous.priorityShipment);
+      if (carrier && !state.villagers.find(npc => npc.id === carrier.id)?.cargo) setToast("Kiriman yang didahulukan sudah tiba.");
+    }
+  }, [snapshot.offline, state]);
+
+  useEffect(() => {
     function handleKey(event: KeyboardEvent) {
       if (snapshot.offline || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.key === "Escape") { closeAll(); return; }
@@ -104,6 +160,8 @@ function GameInterface({ controller }: { controller: VillageController }) {
         case "b": showPanel("build"); break;
         case "n": showPanel("villagers"); break;
         case "m": setMapOpen(open => !open); break;
+        case "+": case "=": controller.camera({ type: "zoom", delta: 0.15 }); break;
+        case "-": controller.camera({ type: "zoom", delta: -0.15 }); break;
       }
     }
     window.addEventListener("keydown", handleKey);
@@ -117,7 +175,7 @@ function GameInterface({ controller }: { controller: VillageController }) {
     if (reason) { setToast(reason); return; }
     setPanel(null);
     controller.selectPlace(id);
-    controller.camera({ type: "pan", ...pointAt(site) });
+    controller.camera({ type: "pan", ...pointAt(site), revealPanel: true });
     setToast(site.name + " masuk daftar pembangunan.");
   }
 
@@ -133,17 +191,18 @@ function GameInterface({ controller }: { controller: VillageController }) {
   }
 
   const hasSelection = snapshot.selectedNpc !== null || snapshot.selectedPlace !== null;
-  const nextBuilding = hasBuilding(state, "mill") ? "bakery" : "mill";
-  const nextSite = BUILD_SITES.find(site => site.id === nextBuilding)!;
-  const project = state.projects.find(project => project.id === nextBuilding);
+  const nextSite = openingGoalSite(state);
+  const baking = nextSite?.id === "bakery" && state.projects.some(project => project.id === "bakery" && project.complete);
+  const step = nextSite?.id === "mill" ? 1 : baking ? 3 : 2;
   const festivalProgress = festivalGoals(state).filter(Boolean).length;
-  const showFestival = project?.complete || festivalProgress === 4;
+  const festivalHeld = state.stats.festivalYear === date.year;
 
   function focusGoal() {
-    if (showFestival) { showPanel("festival"); return; }
+    if (!nextSite) { showPanel("festival"); return; }
+    returnFocus.current = goalButton.current;
     setPanel(null);
-    controller.selectPlace(nextBuilding);
-    controller.camera({ type: "pan", ...pointAt(nextSite) });
+    controller.selectPlace(nextSite.id);
+    controller.camera({ type: "pan", ...pointAt(nextSite), revealPanel: true });
   }
 
   return (
@@ -154,11 +213,12 @@ function GameInterface({ controller }: { controller: VillageController }) {
           <h1>Applebrook</h1>
         </div>
 
-        <button className="village-goal" onClick={focusGoal}>
-          <PixelSprite name={showFestival ? "tool-flag" : nextBuilding} size={32}/>
-          <span>
-            <small>{showFestival ? "Festival panen" : project ? "Sedang dibangun" : "Bangunan berikutnya"}</small>
-            <strong>{showFestival ? festivalProgress + "/4 persiapan selesai" : nextSite.name}</strong>
+        <button ref={goalButton} className="village-goal" onClick={focusGoal}>
+          <PixelSprite name={nextSite ? baking ? "cargo-bread" : `plot-${nextSite.kind}` : "tool-flag"} size={48}/>
+          <span className="goal-copy">
+            {nextSite && <small>Langkah {step} dari 3</small>}
+            <strong>{nextSite ? baking ? "Panggang roti pertama" : `Bangun ${nextSite.name}` : festivalHeld ? "Festival sudah dirayakan" : "Siapkan Festival Panen"}</strong>
+            <span className="goal-status">{nextSite ? openingStatus(state, nextSite.id) : festivalHeld ? "Lihat hasil perayaan tahun ini." : `${festivalProgress} dari 4 persiapan selesai`}</span>
           </span>
           <Icon name="chevron" size={14}/>
         </button>
@@ -177,7 +237,7 @@ function GameInterface({ controller }: { controller: VillageController }) {
           </button>
         </div>
 
-        {panel && <VillagePanel panel={panel} snapshot={snapshot} controller={controller} onClose={() => setPanel(null)} onBuild={build}/>}
+        {panel && <VillagePanel panel={panel} snapshot={snapshot} controller={controller} onClose={closeAll} onBuild={build}/>}
         {!panel && hasSelection && <SelectionCard snapshot={snapshot} controller={controller} onClose={closeAll} onBuild={build}/>}
 
         <nav className="village-hotbar" aria-label="Kelola desa">
@@ -201,10 +261,20 @@ function GameInterface({ controller }: { controller: VillageController }) {
         </div>
 
         <div className="time-dock control-tray">
-          <button aria-label="Panduan bermain" onClick={() => showPanel("guide")}><Icon name="help" size={17}/></button>
-          <button aria-label={sound ? "Matikan suara alam" : "Aktifkan suara alam"} aria-pressed={sound} onClick={toggleSound}><Icon name={sound ? "sound" : "mute"} size={16}/></button>
           <button aria-label={state.speed ? "Jeda permainan" : "Lanjutkan permainan"} aria-pressed={!state.speed} onClick={togglePause}><Icon name={state.speed ? "pause" : "play"} size={15}/></button>
-          {SPEEDS.map(speed => <button key={speed} aria-pressed={state.speed === speed} aria-label={"Kecepatan " + speed + " kali"} onClick={() => controller.setSpeed(speed)}>{speed}×</button>)}
+          <button ref={timeToggle} className="time-options-toggle" aria-label="Pengaturan waktu dan suara" aria-controls="time-options" aria-expanded={timeOptionsOpen}
+            onClick={() => setTimeOptionsOpen(open => !open)}>
+            {state.speed || lastSpeed.current}×
+          </button>
+          <div className="time-extra" id="time-options">
+            <button aria-label="Panduan bermain" onClick={() => showPanel("guide")}><Icon name="help" size={17}/></button>
+            <button aria-label={sound ? "Matikan suara permainan" : "Aktifkan suara permainan"} aria-pressed={sound} onClick={toggleSound}><Icon name={sound ? "sound" : "mute"} size={16}/></button>
+            {SPEEDS.map(speed => <button key={speed} aria-pressed={state.speed === speed} aria-label={"Kecepatan " + speed + " kali"} onClick={() => {
+              controller.setSpeed(speed);
+              if (timeOptionsOpen) timeToggle.current?.focus();
+              setTimeOptionsOpen(false);
+            }}>{speed}×</button>)}
+          </div>
         </div>
 
         {(toast || snapshot.saved === "memory") && <div className="toast" role="status">{toast || "Penyimpanan browser tidak tersedia."}</div>}
@@ -238,7 +308,11 @@ export default function Applebrook() {
 
     void (async () => {
       try {
-        const [{ createGame }] = await Promise.all([import("@/game/create-game"), document.fonts.load("600 16px Pixelify")]);
+        const [{ createGame }] = await Promise.all([
+          import("@/game/create-game"),
+          document.fonts.load("600 16px Pixelify"),
+          document.fonts.load("700 14px Atkinson"),
+        ]);
         if (cancelled || !host.current) return;
         game = createGame(host.current, village, () => { if (!cancelled) setReady(true); }, () => { if (!cancelled) setFailed(true); });
       } catch (error) {

@@ -21,7 +21,7 @@ export const STATIONS: Record<Station, Tile> = {
 export interface BuildSite { id: string; kind: BuildingKind; name: string; description: string; col: number; row: number; coins: number; wood: number; seconds: number; requires?: BuildingKind }
 export const BUILD_SITES: BuildSite[] = [
   { id: "mill", kind: "mill", name: "Penggilingan", description: "Ubah gandum menjadi tepung. Buka langkah berikutnya menuju toko roti.", col: 12, row: 28, coins: 160, wood: 25, seconds: 26 },
-  { id: "bakery", kind: "bakery", name: "Toko roti", description: "Aroma roti hangat, pekerjaan baru, dan hasil panen yang lebih berharga.", col: 30, row: 27, coins: 220, wood: 30, seconds: 32, requires: "mill" },
+  { id: "bakery", kind: "bakery", name: "Toko roti", description: "Olah tepung menjadi roti yang bisa dijual di pasar.", col: 30, row: 27, coins: 145, wood: 30, seconds: 32, requires: "mill" },
   { id: "cottage-1", kind: "cottage", name: "Rumah tepi ladang", description: "Empat tetangga baru siap menetap dan membantu pekerjaan desa.", col: 19, row: 29, coins: 180, wood: 20, seconds: 28 },
   { id: "orchard", kind: "orchard", name: "Perluasan kebun", description: "Lebih banyak pohon apel dan panen musim gugur yang berlimpah.", col: 44, row: 27, coins: 140, wood: 15, seconds: 22 },
   { id: "cottage-2", kind: "cottage", name: "Rumah dekat sungai", description: "Sambut empat penduduk lagi di lingkungan tepi sungai.", col: 32, row: 29, coins: 260, wood: 25, seconds: 30 },

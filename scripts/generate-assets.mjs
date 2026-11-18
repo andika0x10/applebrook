@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { COLS, ROWS, isRoad, riverCenter } from '../game/world.ts';
+import { DISTINCT_ROLES } from '../game/sprites.ts';
 
 const output = fileURLToPath(new URL('../public/assets/applebrook/', import.meta.url));
 mkdirSync(output, { recursive: true });
@@ -197,19 +198,32 @@ for (const [season, colors] of Object.entries(palettes)) for (let variant = 0; v
     }
   });
 }
-for (let stage = 0; stage < 4; stage++) asset(`wheat-${stage}`, 16, 19, p => {
-  for (let i = 0; i < 6; i++) {
-    const x = 2 + i * 2 + i % 2, base = 17 - i % 3, h = 4 + stage * 3 + i % 2;
-    p.line(x, base, x + (i % 3 - 1), base - h, stage > 1 ? '#b18b46' : '#6c8c4a');
-    for (let n = 0; n < (stage > 1 ? 4 : 2); n++) {
+asset('wheat-0', 16, 19, p => {
+  for (const [x, y] of [[3, 15], [8, 17], [13, 15]]) {
+    p.rect(x - 2, y + 1, 5, 1, '#846039');
+    p.rect(x, y - 2, 1, 3, '#b59858');
+    p.pixel(x, y - 2, '#dcc18a');
+  }
+});
+for (let stage = 1; stage <= 3; stage++) asset(`wheat-${stage}`, 16, 19, p => {
+  const ripe = stage === 3;
+  for (let i = 0; i < stage + 3; i++) {
+    const x = 2 + i * 2 + i % 2, base = 17 - i % 3, h = 3 + stage * 3 + i % 2;
+    const tip = x + i % 3 - 1;
+    p.line(x, base, tip, base - h, ripe ? '#a87a3e' : '#587745');
+    if (!ripe) {
+      p.line(x, base - 2, x - 2, base - 5, '#79934c');
+      p.line(x, base - 4, x + 2, base - 6, '#9bae5e');
+    }
+    for (let n = 0; n < (ripe ? 4 : 2); n++) {
       const y = base - h + n * 2;
-      p.rect(x - 1, y, 2, 2, stage > 1 ? ['#e5c77b', '#f0d88e', '#d1ac57'][i % 3] : '#9aac59');
-      p.pixel(x + 1, y + 1, stage > 1 ? '#ead28a' : '#b8be75');
+      p.rect(tip - 1, y, 2, 2, ripe ? ['#eac670', '#f6db90', '#d5a654'][i % 3] : stage === 2 ? '#cabc6b' : '#a4b766');
+      p.pixel(tip + 1, y + 1, ripe ? '#ffe4a0' : '#c7cb78');
     }
   }
 });
 const shirts = ['#7892aa', '#b97470', '#7d9563', '#aa8d65', '#c79a76', '#8c86a5', '#7c9c8e', '#b69b66'];
-for (let color = 0; color < 8; color++) for (const direction of ['down', 'up', 'left', 'right']) for (let step = 0; step < 3; step++) asset(`npc-${color}-${direction}-${step}`, 16, 24, p => {
+for (const role of ['', ...DISTINCT_ROLES]) for (let color = 0; color < 8; color++) for (const direction of ['down', 'up', 'left', 'right']) for (let step = 0; step < 3; step++) asset(`npc-${role ? role + '-' : ''}${color}-${direction}-${step}`, 16, 24, p => {
   const stride = step === 1 ? 1 : step === 2 ? -1 : 0;
   const skin = color % 3 === 0 ? '#d4a17a' : color % 3 === 1 ? '#e3b78c' : '#bc8c67';
   p.rect(5, 18, 3, 5 + stride, '#5e665a'); p.rect(9, 18, 3, 5 - stride, '#4e594f');
@@ -223,7 +237,17 @@ for (let color = 0; color < 8; color++) for (const direction of ['down', 'up', '
     if (direction !== 'right') p.pixel(6, 8, '#4b4a3b');
     p.rect(7, 11, 3, 1, '#bc8b68');
   } else p.rect(5, 5, 7, 5, '#77563e');
-  if (color === 0 || color === 2 || color === 4) {
+  if (role === 'baker') {
+    p.rect(5, 4, 8, 2, '#b7bca3'); p.rect(4, 1, 10, 3, '#fff1cb'); p.rect(5, 0, 7, 4, '#f8e4bd');
+    if (direction !== 'up') {
+      p.rect(6, 13, 5, 7, '#f2deaf'); p.rect(6, 16, 5, 1, '#a4544c'); p.rect(7, 18, 3, 1, '#c6ad88');
+    }
+  } else if (role === 'hauler') {
+    p.rect(4, 3, 9, 3, '#465f61'); p.rect(6, 2, 5, 2, '#638787');
+  } else if (role === 'carpenter') {
+    p.rect(4, 3, 9, 3, '#a45142'); p.rect(6, 2, 5, 2, '#cb7950');
+    p.rect(3, 5, 11, 1, '#6f4c37'); p.rect(6, 11, 5, 2, '#d78b53');
+  } else if (color === 0 || color === 2 || color === 4) {
     p.rect(3, 4, 11, 2, '#b58a4d'); p.rect(5, 1, 7, 4, '#e6bd72'); p.rect(5, 3, 7, 1, '#84613f');
   } else if (color === 1 || color === 5 || color === 7) {
     const cap = color === 1 ? '#a95650' : color === 5 ? '#535874' : '#747742';
@@ -233,8 +257,21 @@ for (let color = 0; color < 8; color++) for (const direction of ['down', 'up', '
     p.rect(5, 2, 7, 3, color === 3 ? '#6b4333' : '#483934');
     p.rect(direction === 'left' ? 11 : 4, 4, 2, 5, color === 3 ? '#976341' : '#5b4238');
   }
-  if (direction === 'up') { p.rect(6, 13, 5, 6, '#a68c61'); p.rect(7, 14, 3, 1, '#c4ab7b'); }
-  else { p.rect(6, 14, 1, 6, '#d4c5a0'); p.rect(10, 14, 1, 6, '#d4c5a0'); }
+  if (role === 'hauler') {
+    if (direction === 'up') {
+      p.rect(4, 12, 9, 7, '#694d39'); p.rect(5, 12, 7, 6, '#bc925d'); p.rect(5, 14, 7, 1, '#e1b980');
+    } else {
+      p.rect(5, 12, 2, 7, '#dfb67a'); p.rect(10, 12, 2, 7, '#dfb67a');
+      p.rect(6, 16, 4, 1, '#77543f');
+    }
+  } else if (role === 'carpenter') {
+    const side = direction === 'left' ? 3 : 12;
+    p.rect(4, 17, 9, 2, '#754931'); p.rect(side, 15, 2, 6, '#bd8754');
+    p.rect(side - 1, 14, 4, 2, '#bbc5ac');
+  } else if (!role) {
+    if (direction === 'up') { p.rect(6, 13, 5, 6, '#a68c61'); p.rect(7, 14, 3, 1, '#c4ab7b'); }
+    else { p.rect(6, 14, 1, 6, '#d4c5a0'); p.rect(10, 14, 1, 6, '#d4c5a0'); }
+  }
 });
 asset('tractor', 50, 32, p => {
   shadow(p, 25, 28, 23, 4);
@@ -299,7 +336,31 @@ asset('sign', 23, 30, p => { p.rect(10, 10, 3, 19, WOOD); p.poly([[1, 3], [17, 3
 asset('mailbox', 16, 25, p => { p.rect(7, 12, 3, 12, WOOD); p.rect(2, 4, 13, 10, '#7b8f85'); p.rect(3, 2, 11, 3, '#a4b29d'); p.rect(3, 6, 7, 5, '#5e746b'); p.rect(12, 3, 1, 7, '#b9675a'); p.rect(12, 3, 4, 3, '#c98a70'); });
 asset('lamp', 18, 49, p => { p.rect(7, 13, 3, 35, '#697465'); p.rect(5, 45, 7, 3, '#7d8675'); p.rect(3, 5, 11, 12, '#607062'); p.rect(5, 7, 7, 8, '#e9d6a0'); p.rect(8, 6, 1, 10, '#9a906b'); p.poly([[1, 5], [8, 0], [16, 5]], '#788574'); });
 asset('scarecrow', 29, 39, p => { p.rect(13, 14, 3, 25, WOOD); p.rect(2, 15, 25, 3, WOOD); p.poly([[8, 11], [20, 11], [26, 22], [4, 22]], '#9b8671'); p.rect(10, 7, 9, 8, '#d2b888'); p.rect(6, 6, 17, 3, '#d2b879'); p.rect(10, 2, 9, 5, '#d9c48e'); p.rect(10, 21, 4, 7, '#7a8f95'); p.rect(16, 21, 4, 7, '#7a8f95'); });
-asset('build-sign', 27, 33, p => { p.rect(12, 18, 3, 15, WOOD); p.rect(2, 2, 23, 21, WOOD_DARK); p.rect(3, 3, 21, 18, '#ded2a7'); p.rect(12, 7, 3, 11, '#819262'); p.rect(8, 11, 11, 3, '#819262'); p.rect(4, 21, 19, 2, '#a88a5e'); });
+const plotIcons = {
+  mill(p) {
+    p.line(16, 8, 16, 25, '#80634b', 2); p.poly([[11, 26], [14, 14], [18, 14], [21, 26]], '#917454');
+    p.line(10, 19, 22, 7, '#4b6653', 3); p.line(10, 7, 22, 19, '#4b6653', 3); p.rect(15, 12, 3, 3, '#f4dfa6');
+  },
+  bakery(p) {
+    p.ellipse(16, 15, 9, 6, '#7a4938'); p.ellipse(16, 14, 8, 5, '#b97c45');
+    for (const x of [12, 16, 20]) p.line(x, 15, x + 1, 12, '#f2d49a', 2);
+  },
+  cottage(p) {
+    p.rect(10, 12, 13, 10, '#bf925e'); p.poly([[7, 13], [16, 5], [25, 13]], '#8f554b');
+    p.rect(14, 16, 4, 6, '#725244'); p.rect(19, 15, 2, 3, '#f4dfa6');
+  },
+  orchard(p) {
+    p.line(16, 8, 18, 6, '#4b6653', 2); p.rect(15, 9, 2, 3, '#77543f');
+    p.ellipse(13, 15, 5, 5, '#a95a4c'); p.ellipse(19, 15, 5, 5, '#a95a4c'); p.ellipse(16, 18, 6, 4, '#a95a4c');
+    p.rect(11, 13, 2, 3, '#eab184');
+  },
+};
+for (const [kind, drawIcon] of Object.entries(plotIcons)) asset(`plot-${kind}`, 33, 38, p => {
+  p.rect(14, 23, 5, 15, WOOD_DARK); p.rect(15, 24, 2, 13, WOOD_LIGHT);
+  p.rect(1, 1, 31, 25, WOOD_DARK); p.rect(3, 3, 27, 20, '#f5e1ae');
+  p.rect(3, 23, 27, 2, '#bb945e'); p.pixel(5, 5, '#a88a5e'); p.pixel(27, 5, '#a88a5e');
+  drawIcon(p);
+});
 asset('hud-coin', 16, 16, p => {
   p.ellipse(8, 8, 7, 7, '#64472e'); p.ellipse(8, 7, 6, 6, '#d89a3e');
   p.ellipse(7, 6, 5, 5, '#f9cc67'); p.rect(7, 4, 2, 6, '#a76d2e'); p.rect(4, 4, 2, 1, '#ffe499');
